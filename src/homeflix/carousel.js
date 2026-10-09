@@ -8,13 +8,15 @@ export function createCarousel(root, titles, { play, details }) {
     const artwork = node('div','hf-hero-art'); const copy = node('div','hf-hero-copy');
     const dots = node('div','hf-carousel-dots'); const pause = iconAction('Pause slideshow',() => { paused = !paused; updatePause(); schedule(); },'pause');
     const previous = iconAction('Previous featured title',() => change(-1),'chevron','hf-previous'); const next = iconAction('Next featured title',() => change(1),'chevron');
-    const controls = node('div','hf-carousel-controls',previous,dots,next,pause); root.append(artwork,copy,controls);
+    const position = node('span','hf-carousel-position');position.setAttribute('aria-hidden','true');
+    const controls = node('div','hf-carousel-controls',position,previous,dots,next,pause); root.append(artwork,copy,controls);
     const indicators = items.map((item,i) => { const dot = action('',() => { index=i; render(); schedule(); },'hf-carousel-dot'); dot.setAttribute('aria-label',`Show ${item.title}`); dots.append(dot); return dot; });
     function updatePause() { pause.replaceChildren(); const fresh = iconAction(paused ? 'Resume slideshow' : 'Pause slideshow',() => {},paused ? 'play' : 'pause'); pause.append(...fresh.childNodes); pause.setAttribute('aria-label',paused ? 'Resume slideshow' : 'Pause slideshow'); pause.setAttribute('aria-pressed',String(paused)); }
     function render() {
         const item = items[index]; const image = safeImage(item.backdrop || item.poster); artwork.style.backgroundImage = image ? `url("${image}")` : '';
         copy.replaceChildren(node('p','hf-eyebrow','NEW ON HOMEFLIX'),node('h1','',item.title),node('p','hf-hero-meta',[item.year,item.rating ? `★ ${Number(item.rating).toFixed(1)}` : '',...(item.genres || []).slice(0,2)].filter(Boolean).join(' · ')),node('p','hf-hero-description',item.overview || ''),node('div','hf-actions',action(item.progress ? 'Resume' : 'Play',() => play(item),'hf-button hf-primary','play'),action('Details',() => details(item),'hf-button hf-glass')));
         indicators.forEach((dot,i) => dot.setAttribute('aria-current',String(i===index)));
+        position.textContent = `${String(index+1).padStart(2,'0')} / ${String(items.length).padStart(2,'0')}`;
         root.dataset.slide = String(index); root.setAttribute('aria-label',`New on HomeFlix · ${index+1} of ${items.length}`);
     }
     function change(amount) { index=(index+amount+items.length)%items.length; render(); schedule(); }

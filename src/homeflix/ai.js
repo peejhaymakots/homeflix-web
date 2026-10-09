@@ -19,7 +19,7 @@ export function createAI(root,{state,scope='general',catalogAllowed,integration,
     state.branches ||= { library:{items:[],exclude:[],more:true}, catalog:{items:[],exclude:[],page:1,more:true} };
     const panel=node('section','hf-ai hf-ai-compact');panel.setAttribute('aria-label','HomeFlix AI');panel.dataset.scope=scope;
     const heading=node('h2','hf-ai-title','HomeFlix AI');
-    const toggle=action('',()=>{setOpen(pointerOpen===undefined?body.hidden:!pointerOpen);pointerOpen=undefined;},'hf-ai-toggle');toggle.append(icon('sparkle'),heading,icon('chevron'));toggle.setAttribute('aria-expanded','false');toggle.addEventListener('pointerdown',()=>{pointerOpen=!body.hidden;});
+    const toggle=action('',()=>{setOpen(pointerOpen===undefined?body.hidden:!pointerOpen);pointerOpen=undefined;},'hf-ai-toggle');const hint=node('span','hf-ai-hint','What are you in the mood for?');hint.setAttribute('aria-hidden','true');toggle.append(icon('sparkle'),heading,hint,icon('chevron'));toggle.setAttribute('aria-expanded','false');toggle.addEventListener('pointerdown',()=>{pointerOpen=!body.hidden;});
     const body=node('div','hf-ai-body');body.id=`hf-ai-body-${scope}`;body.hidden=true;toggle.setAttribute('aria-controls',body.id);
     const close=iconAction('Close HomeFlix AI',()=>setOpen(false,true),'close');
     const input=node('textarea');input.rows=1;input.maxLength=500;input.placeholder='Tell me what you feel like watching…';input.setAttribute('aria-label','What would you like to watch?');input.value=state.prompt || '';

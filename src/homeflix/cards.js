@@ -6,10 +6,12 @@ export function mediaCard(item, details, landscape = false) {
     cover.append(node('span','hf-cover-fallback',item.title));
     const src = safeImage(landscape ? item.backdrop || item.poster : item.poster);
     if (src) { const img = node('img'); img.src = src; img.alt = ''; img.loading = 'lazy'; img.addEventListener('error',() => img.remove(),{once:true}); cover.append(img); }
-    if (item.rating) cover.append(node('span','hf-card-rating',`★ ${Number(item.rating).toFixed(1)}`));
     cover.append(node('span','hf-cover-action','View details'));
     if (item.progress) { const track = node('span','hf-progress'); const bar = node('span'); bar.style.width = `${Math.min(100,item.progress)}%`; track.append(bar); cover.append(track); }
-    card.append(cover,action(item.title,() => details(item),'hf-card-title'),node('p','hf-card-meta',[item.year,item.episodeLabel || (item.type === 'tv' ? 'Series' : 'Movie'),item.releaseDate ? new Date(item.releaseDate).toLocaleDateString(undefined,{month:'short',day:'numeric'}) : ''].filter(Boolean).join(' · ')));
+    const meta=node('p','hf-card-meta');
+    if(item.rating)meta.append(node('span','hf-card-rating',`★ ${Number(item.rating).toFixed(1)}`));
+    meta.append(node('span','',[item.year,item.episodeLabel || (item.type === 'tv' ? 'Series' : 'Movie'),item.releaseDate ? new Date(item.releaseDate).toLocaleDateString(undefined,{month:'short',day:'numeric'}) : ''].filter(Boolean).join(' · ')));
+    card.append(cover,action(item.title,() => details(item),'hf-card-title'),meta);
     if (!item.library && item.availability) card.append(node('span','hf-availability',item.availability));
     return card;
 }

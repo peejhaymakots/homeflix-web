@@ -9,6 +9,9 @@ import { createAI } from './ai';
 import { createDetails } from './details';
 import { libraryFilterFields, libraryParams, openFilters, filterCount, filterChips } from './filters';
 import './homeflix.scss';
+import './presentation.scss';
+import './forms-theme.scss';
+import './details-theme.scss';
 
 const librarySorts=[['SortName','Title'],['Random','Random'],['CommunityRating','Community rating'],['CriticRating','Critic rating'],['DateCreated','Date added'],['DatePlayed','Last played'],['OfficialRating','Parental rating'],['PlayCount','Play count'],['PremiereDate','Release date'],['Runtime','Runtime']];
 
@@ -17,7 +20,7 @@ export function createHomeflix(root) {
     let libraries=[],catalogAllowed=false,requestReady=false,integrationReady=false,discoveryFields={},currentView='home',selectedLibrary='',discoverView='discover',language='english',restoreScroll=0,restoreSearch='';
     let aiState={prompt:'',language:'english',items:[]};const browsing=new Map(),aiStates=new Map([['general',aiState]]);
     const app=node('div','hf-app');const nav=node('nav','hf-nav');nav.setAttribute('aria-label','Main navigation');
-    const brand=action('HomeFlix',()=>navigate('home'),'hf-brand');brand.append(node('span','hf-brand-dot'));
+    const brand=action('HomeFlix',()=>navigate('home'),'hf-brand');brand.prepend(node('span','hf-brand-mark',icon('play')));
     const tools=node('div','hf-user-tools');const header=node('header','hf-header',brand,nav,tools);
     const main=node('main');const aiHost=node('div','hf-ai-host');const hero=node('section','hf-hero');hero.hidden=true;const content=node('div','hf-content');
     const heading=node('h1','hf-page-title');const controls=node('div','hf-controls');const status=node('div','hf-status');status.setAttribute('role','status');const results=node('div','hf-results');const shortcuts=node('div','hf-library-shortcuts');
