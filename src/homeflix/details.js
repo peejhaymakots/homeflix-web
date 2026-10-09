@@ -1,16 +1,19 @@
 import { node, action, iconAction, icon, field, select, safeImage, external } from './ui';
+import { peopleCards, createPersonDetails } from './people';
 
-export function createDetails({client,userId,api,normalize,play,isSaved,toggleList,getLanguage,setLanguage}) {
-    let current,sequence=0,cooldown=0;const cache=new Map();
-    const close=()=>current?.close();
-    async function show(item) {
-        close();const previous=document.activeElement;const ticket=++sequence;const controller=new AbortController();
-        const dialog=node('dialog','hf-dialog');current=dialog;
-        const body=node('div','hf-detail-body',node('div','hf-detail-loading','Loading details…'));dialog.append(iconAction('Close details',close,'close','hf-close'),body);
-        dialog.addEventListener('click',event=>{if(event.target===dialog)close();});
+export function createDetails({client,userId,api,normalize,play,isSaved,toggleList,getLanguage,setLanguage,getPersonTitles}) {
+    let cooldown=0;const cache=new Map();const dialogs=new Map();
+    const close=()=>{[...dialogs.entries()].reverse().forEach(([dialog,person])=>{person.close();dialog.close();});};
+    async function show(item,{nested=false}={}) {
+        if(!nested)close();const previous=document.activeElement;const controller=new AbortController();
+        const dialog=node('dialog','hf-dialog');
+        const people=createPersonDetails({client,userId,getPersonTitles,showMedia:media=>show(media,{nested:true})});dialogs.set(dialog,people);
+        const dismiss=()=>{people.close();dialog.close();};
+        const body=node('div','hf-detail-body',node('div','hf-detail-loading','Loading details…'));dialog.append(iconAction('Close details',dismiss,'close','hf-close'),body);
+        dialog.addEventListener('click',event=>{if(event.target===dialog)dismiss();});
         let timer,summaryVersion=0,summaryBusy=false,pendingLanguage,playingItem,versionSelect,audioSelect,subtitleSelect,episodeVersion=0;
-        const alive=()=>current===dialog && dialog.open && ticket===sequence;
-        dialog.addEventListener('close',()=>{controller.abort();clearTimeout(timer);summaryVersion++;episodeVersion++;if(current===dialog)current=null;dialog.remove();previous?.focus({preventScroll:true});document.dispatchEvent(new Event('homeflix:dialog'));});
+        const alive=()=>dialogs.has(dialog) && dialog.open && !controller.signal.aborted;
+        dialog.addEventListener('close',()=>{people.close();controller.abort();clearTimeout(timer);summaryVersion++;episodeVersion++;dialogs.delete(dialog);dialog.remove();if(previous?.isConnected)previous.focus({preventScroll:true});document.dispatchEvent(new Event('homeflix:dialog'));});
         document.body.append(dialog);dialog.showModal();document.dispatchEvent(new Event('homeflix:dialog'));
         try {
             let active=item;
@@ -19,7 +22,7 @@ export function createDetails({client,userId,api,normalize,play,isSaved,toggleLi
             const visual=node('div','hf-detail-visual');const poster=safeImage(active.poster);if(poster){const img=node('img','hf-detail-poster');img.src=poster;img.alt=`${active.title} poster`;visual.append(img);}body.append(visual);
             const content=node('div','hf-detail-content');body.append(content);
             const header=node('div','hf-detail-heading',node('p','hf-eyebrow',active.library?'YOUR LIBRARY':active.availability || 'DISCOVER'),node('h2','',active.title));
-            const facts=node('div','hf-detail-facts');const genres=node('div','hf-detail-genres');const tagline=node('p','hf-detail-tagline');const origin=node('p','hf-detail-origin');const credits=node('div','hf-detail-credits');const links=node('div','hf-detail-links');
+            const facts=node('div','hf-detail-facts');const genres=node('div','hf-detail-genres');const tagline=node('p','hf-detail-tagline');const origin=node('p','hf-detail-origin');const credits=node('div','hf-detail-credits');const castAndCrew=node('div','hf-people-container');const links=node('div','hf-detail-links');
             const actions=node('div','hf-detail-actions');const saved=action(isSaved(active)?'Saved to My List':'Add to My List',()=>{toggleList(active);saved.replaceChildren(isSaved(active)?'Saved to My List':'Add to My List');saved.setAttribute('aria-pressed',String(isSaved(active)));},'hf-button','bookmark');saved.setAttribute('aria-pressed',String(isSaved(active)));
             const playNow=action('Play',()=>start(false),'hf-button hf-primary','play');const restart=action('Start over',()=>start(true),'hf-button hf-secondary');
             if(active.library){actions.append(playNow,restart);playingItem=active;}actions.append(saved);
@@ -28,13 +31,16 @@ export function createDetails({client,userId,api,normalize,play,isSaved,toggleLi
             const summary=node('section','hf-summary');const languages=node('div','hf-language-tabs');const summaryText=node('p','hf-summary-text','Preparing your spoiler-free summary…');const retry=action('Retry summary',()=>queueSummary(getLanguage()),'hf-text-button','refresh');retry.hidden=true;
             summary.append(node('div','hf-summary-heading',node('h3','', 'HomeFlix AI summary'),node('span','hf-summary-label','SPOILER-FREE')),languages,summaryText,retry);
             const synopsis=node('details','hf-synopsis',node('summary','',node('span','','Full synopsis'),node('span','hf-muted','May contain spoilers')),node('p','',active.overview || 'No synopsis is available.'));
-            content.append(summary,synopsis,credits);
+            content.append(summary,synopsis,credits,castAndCrew);
             if(active.library){origin.after(options);content.append(episodeContainer);}else if(active.canRequest)renderRequest();
             function metadata(media) {
                 facts.replaceChildren();[media.year,media.tmdbRating?`TMDB ${media.tmdbRating}`:media.rating?`★ ${Number(media.rating).toFixed(1)} / 10`:'',media.runtime || (media.raw?.RunTimeTicks?`${Math.round(media.raw.RunTimeTicks/600000000)} min`:''),media.certification || media.raw?.OfficialRating,media.releaseDate?`Released ${new Date(media.releaseDate).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'})}`:'',media.statusText || media.status || media.raw?.Status].filter(Boolean).forEach(text=>facts.append(node('span','',text)));
                 genres.replaceChildren(...(media.genres || []).map(genre=>node('span','',genre)));tagline.textContent=media.tagline || media.raw?.Taglines?.[0] || '';origin.textContent=media.origin || (media.raw?.ProductionLocations || []).join(', ');credits.replaceChildren();
-                const director=media.director || (media.raw?.People || []).filter(person=>person.Type==='Director').map(person=>person.Name).join(', ');const cast=Array.isArray(media.cast)?media.cast.join(', '):media.cast || (media.raw?.People || []).filter(person=>person.Type==='Actor').slice(0,12).map(person=>person.Name).join(', ');
-                if(director || media.creator)credits.append(node('p','',node('strong','',media.creator?'Creator: ':'Director: '),director || media.creator));if(cast)credits.append(node('p','',node('strong','','Cast: '),cast));
+                const nativePeople=media.raw?.People || active.raw?.People || [];
+                if(!castAndCrew.firstElementChild && nativePeople.length){const cards=peopleCards({people:nativePeople,client,open:getPersonTitles?person=>people.show(person):undefined});if(cards)castAndCrew.append(cards);}
+                // Catalog enrichment contains names only; do not fabricate person links.
+                if(!nativePeople.length){const cast=Array.isArray(media.cast)?media.cast.join(', '):media.cast;if(media.director || media.creator)credits.append(node('p','',node('strong','',media.creator?'Creator: ':'Director: '),media.creator || media.director));if(cast)credits.append(node('p','',node('strong','','Cast: '),cast));}
+                credits.hidden=!credits.childElementCount;
                 links.replaceChildren();if(media.trailerUrl)links.append(external('Trailer',media.trailerUrl));else if(media.raw?.RemoteTrailers?.length){const trailer=media.raw.RemoteTrailers.find(x=>x.Url);const link=external('Trailer',trailer?.Url);if(link)links.append(link);}if(media.imdbUrl)links.append(external('IMDb reviews',media.imdbUrl));if(media.tmdbUrl)links.append(external('TMDB reviews',media.tmdbUrl));
                 const backdrop=safeImage(media.backdrop);if(backdrop)visual.style.backgroundImage=`url("${backdrop}")`;
             }
@@ -87,7 +93,7 @@ export function createDetails({client,userId,api,normalize,play,isSaved,toggleLi
             metadata(active);renderPlayback();queueSummary(getLanguage());
             if(active.raw?.Type==='Series')seriesEpisodes().catch(error=>{if(alive())episodeContainer.append(node('p','hf-inline-status',error.message));});
             if(active.library)api(`details?itemId=${encodeURIComponent(active.id)}`,undefined,controller.signal).then(data=>{if(alive())metadata({...active,...data.item});}).catch(()=>{/* Native metadata and playback remain available. */});
-        } catch(error) {if(alive()&&error.name!=='AbortError')body.replaceChildren(node('div','hf-empty',node('h2','',item.title),node('p','',error.message),action('Close',close)));}
+        } catch(error) {if(alive()&&error.name!=='AbortError')body.replaceChildren(node('div','hf-empty',node('h2','',item.title),node('p','',error.message),action('Close',dismiss)));}
     }
     return {show,close,destroy:()=>{close();cache.clear();}};
 }

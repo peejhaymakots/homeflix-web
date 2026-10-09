@@ -52,6 +52,7 @@ import './homeflix/homeflix.scss';
 import './homeflix/presentation.scss';
 import './homeflix/forms-theme.scss';
 import './homeflix/details-theme.scss';
+import './homeflix/people.scss';
 
 async function init() {
     // Log current version to console to help out with issue triage and debugging
