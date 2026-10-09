@@ -1,4 +1,4 @@
-import { node, action, iconAction, field, select, safeImage, external } from './ui';
+import { node, action, iconAction, icon, field, select, safeImage, external } from './ui';
 
 export function createDetails({client,userId,api,normalize,play,isSaved,toggleList,getLanguage,setLanguage}) {
     let current,sequence=0,cooldown=0;const cache=new Map();
@@ -39,7 +39,7 @@ export function createDetails({client,userId,api,normalize,play,isSaved,toggleLi
                 const backdrop=safeImage(media.backdrop);if(backdrop)visual.style.backgroundImage=`url("${backdrop}")`;
             }
             function updatePlay() {
-                const raw=playingItem?.raw;const resumable=(raw?.UserData?.PlaybackPositionTicks || 0)>0;playNow.replaceChildren(resumable?'Resume':raw?.Type==='Episode'?'Play episode':'Play');restart.hidden=!resumable;playNow.disabled=!raw || raw.Type==='Series';
+                const raw=playingItem?.raw;const resumable=(raw?.UserData?.PlaybackPositionTicks || 0)>0;playNow.replaceChildren(icon('play'),resumable?'Resume':raw?.Type==='Episode'?'Play episode':'Play');restart.hidden=!resumable;playNow.disabled=!raw || raw.Type==='Series';
             }
             function sourceTracks() {
                 const source=(playingItem?.raw?.MediaSources || []).find(x=>x.Id===versionSelect.value);const streams=source?.MediaStreams || [];
