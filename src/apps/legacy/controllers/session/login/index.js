@@ -21,6 +21,7 @@ import baseAlert from 'components/alert';
 import { getDefaultBackgroundClass } from 'components/cardbuilder/utils/builder';
 
 import './login.scss';
+import { connectRequests } from 'homeflix/api';
 
 const domPurify = createDOMPurify();
 domPurify.setConfig({
@@ -32,8 +33,10 @@ const enableFocusTransform = !browser.slow && !browser.edge;
 
 function authenticateUserByName(page, apiClient, url, username, password) {
     loading.show();
-    apiClient.authenticateUserByName(username, password).then(function (result) {
+    apiClient.authenticateUserByName(username, password).then(async function (result) {
         const user = result.User;
+        await connectRequests(username, password, result.AccessToken, apiClient);
+        page.querySelector('#txtManualPassword').value = '';
         loading.hide();
 
         onLoginSuccessful(user.Id, result.AccessToken, apiClient, url);
