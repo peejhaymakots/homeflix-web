@@ -45,7 +45,7 @@ export function updateCardMetadata(card, item) {
     meta.append(node('span', 'hf-card-year', item.year || ''));
     const facts = card.querySelector('.hf-card-facts'); facts.replaceChildren();
     const uploaded = dateText(item.uploaded || item.raw?.DateCreated);
-    const origin = (item.origin || (item.raw?.ProductionLocations || []).join(', ')).replace(/\s*\|\s*Language:.*$/i, '');
+    const origin = (item.origin || (item.raw?.ProductionLocations || []).join(', ')).replace(/^Origin:\s*/i, '').replace(/\s*\|\s*Language:.*$/i, '');
     const language = item.originalLanguage || '';
     let languageName = language;
     try { if (/^[a-z]{2,3}$/i.test(language)) languageName = new Intl.DisplayNames(['en'], { type: 'language' }).of(language.toLowerCase()); } catch { /* Keep the verified language code. */ }
