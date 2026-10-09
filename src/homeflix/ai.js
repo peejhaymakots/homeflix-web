@@ -40,7 +40,7 @@ export function createAI(root,{state,scope='general',catalogAllowed,integration,
     const form=node('form','hf-ai-form',node('div','hf-ai-composer',icon('sparkle'),input,submit));form.addEventListener('submit',event=>{event.preventDefault();run(false);});
     const suggestions=node('div','hf-ai-suggestions');for(const text of ['A mystery with clever twists','Something funny tonight','Movies starring Tom Hanks'])suggestions.append(action(text,()=>{input.value=text;state.prompt=text;input.focus();},'hf-prompt-chip'));
     body.append(node('div','hf-ai-toolbar',languageControl,close),form,suggestions,status,choices,picks,more);panel.append(toggle,body);root.append(panel);
-    function setOpen(open,restore=false){clearTimeout(leaveTimer);body.hidden=!open;toggle.setAttribute('aria-expanded',String(open));panel.classList.toggle('hf-ai-open',open);if(!open){setLanguageOpen(false);if(restore){escapeClosing=true;toggle.focus();queueMicrotask(()=>{escapeClosing=false;});}}}
+    function setOpen(open,restore=false){if(open)updateLanguage();clearTimeout(leaveTimer);body.hidden=!open;toggle.setAttribute('aria-expanded',String(open));panel.classList.toggle('hf-ai-open',open);if(!open){setLanguageOpen(false);if(restore){escapeClosing=true;toggle.focus();queueMicrotask(()=>{escapeClosing=false;});}}}
     const fine=()=>matchMedia('(hover:hover) and (pointer:fine)').matches;
     panel.addEventListener('pointerenter',()=>{if(fine())setOpen(true);});
     panel.addEventListener('pointerleave',()=>{if(fine())leaveTimer=setTimeout(()=>{if(!panel.contains(document.activeElement)&&!input.value.trim()&&!state.busy&&!state.items?.length)setOpen(false);},250);});
@@ -54,7 +54,7 @@ export function createAI(root,{state,scope='general',catalogAllowed,integration,
         const tm=state.items.map(item=>{const id=item.tmdbId || item.raw?.ProviderIds?.Tmdb || (!item.library?item.id:'');return id?`${item.type}:${id}`:'';}).filter(Boolean);
         state.branches.library.exclude=[...new Set([...state.branches.library.exclude,...jf])].slice(-100);
         state.branches.catalog.exclude=[...new Set([...state.branches.catalog.exclude,...tm])].slice(-100);
-        picks.replaceChildren();if(state.items.length){const grid=mediaGrid(state.items,details);[...grid.children].forEach((card,index)=>{const item=state.items[index];card.append(node('span','hf-ai-availability',item.library?'Play':item.canRequest?'Request':item.availability || 'Requested'));});picks.append(grid);}
+        picks.replaceChildren();if(state.items.length){const grid=mediaGrid(state.items,details);[...grid.children].forEach((card,index)=>{const item=state.items[index];card.querySelector('.hf-availability')?.remove();card.append(node('span','hf-ai-availability',item.library?'Play':item.canRequest?'Request':item.availability || 'Requested'));});picks.append(grid);}
         status.textContent=state.message || '';updateControls();
     }
     function updateControls(){
