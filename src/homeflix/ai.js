@@ -13,7 +13,7 @@ export function mergePicks(items) {
     }
     return kept;
 }
-export function createAI(root,{state,scope='general',catalogAllowed,requestReady,integration,api,hydrate,details,onLanguage}) {
+export function createAI(root,{state,scope='general',catalogAllowed,integration,api,hydrate,details,onLanguage}) {
     let active=true,controller,flight=0,leaveTimer,clock,escapeClosing=false,pointerOpen;
     state.language=languages[state.language]?state.language:'english';
     state.branches ||= { library:{items:[],exclude:[],more:true}, catalog:{items:[],exclude:[],page:1,more:true} };
@@ -58,25 +58,26 @@ export function createAI(root,{state,scope='general',catalogAllowed,requestReady
         status.textContent=state.message || '';updateControls();
     }
     function updateControls(){
-        if(integration)({catalogAllowed,requestReady}=integration());
-        const now=Date.now();const branches=[state.branches.library,...(catalogAllowed&&requestReady?[state.branches.catalog]:[])];
+        if(integration)({catalogAllowed}=integration());
+        const now=Date.now();const branches=[state.branches.library,...(catalogAllowed?[state.branches.catalog]:[])];
         const available=branches.some(branch=>!(branch.retryAt>now));submit.disabled=!!state.busy||!available;
         submit.textContent=state.busy?'Finding your picks…':available?'Find my next watch':`Try again in ${Math.max(1,Math.ceil((Math.min(...branches.map(b=>b.retryAt))-now)/1000))}s`;
         more.hidden=!state.items?.length||!branches.some(branch=>branch.more);more.disabled=!!state.busy||!branches.some(branch=>branch.more&&!(branch.retryAt>now));
     }
     clock=setInterval(updateControls,1000);render();
     async function run(append){
-        if(integration)({catalogAllowed,requestReady}=integration());
+        if(integration)({catalogAllowed}=integration());
+        const permissionPending=integration&&!integration().ready&&!catalogAllowed;
         const prompt=input.value.trim(),queryLanguage=state.language;if(!prompt){setOpen(true);input.focus();return;}if(state.busy)return;
         controller?.abort();controller=new AbortController();const signal=controller.signal;const ticket=++flight;setOpen(true);state.prompt=input.value;state.busy=true;choices.replaceChildren();
         // Results remain visible until at least one branch succeeds.
         const previous=state.branches;const same=state.query===`${prompt}:${queryLanguage}`;
         const fresh=!append||!same;const branches=fresh?{library:{items:previous.library.items,exclude:[],more:true,retryAt:previous.library.retryAt},catalog:{items:catalogAllowed?previous.catalog.items:[],exclude:[],page:1,more:true,retryAt:previous.catalog.retryAt}}:previous;
         const messages={},warnings=[];let succeeded=false;
-        if(!catalogAllowed){}else if(!requestReady)warnings.push('Requests is unavailable right now. Searching your library.');
+
         const jobs=[];
         for(const name of ['library','catalog']){
-            if(name==='catalog'&&(!catalogAllowed||!requestReady))continue;
+            if(name==='catalog'&&!catalogAllowed&&!permissionPending)continue;
             const branch=branches[name];if(append&&!branch.more)continue;
             if(branch.retryAt>Date.now()){warnings.push(`${name==='library'?'Library AI':'Catalog AI'} is cooling down. Try again shortly.`);continue;}
             jobs.push((async()=>{
