@@ -1,5 +1,5 @@
 import { node, action, icon, iconAction, safeImage } from './ui';
-import { mediaGrid } from './cards';
+import { mediaGrid, updateCardMetadata } from './cards';
 
 const personRole = ({ Type, Role }) => {
     if (['Actor', 'GuestStar'].includes(Type) && Role) return `as ${Role}`;
@@ -141,7 +141,7 @@ export function createPersonDetails({ client, userId, getEntityTitles, getPerson
                             cover.querySelector('.hf-cover-fallback').textContent = item.title;
                             const fresh = mediaGrid([item], () => {}).firstElementChild;
                             const picture = fresh.querySelector('.hf-cover img'); cover.querySelector('img')?.remove(); if (picture) cover.append(picture);
-                            record.card.querySelector('.hf-card-meta').replaceWith(fresh.querySelector('.hf-card-meta'));
+                            updateCardMetadata(record.card, item);
                         }
                     }
                     const card = record.card; card.dataset.identity = identity; keep.add(card);
