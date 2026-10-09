@@ -78,7 +78,7 @@ export function createHomeflix(root) {
         closeDetails();
         if (raw && raw.Type !== 'Series') {
             raw.ServerId = client.serverId();
-            playbackManager.play({ items: [raw], startPosition: raw.UserData?.PlaybackPositionTicks || 0 }).catch(actionError);
+            playbackManager.play({ ids: [raw.Id], serverId: client.serverId(), startPositionTicks: raw.UserData?.PlaybackPositionTicks || 0 }).catch(actionError);
         } else Dashboard.navigate(`details?id=${encodeURIComponent(item.jellyfinId || item.id)}&serverId=${client.serverId()}`);
     }
     async function home() {
