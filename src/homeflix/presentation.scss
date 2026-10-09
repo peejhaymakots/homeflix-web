@@ -76,7 +76,7 @@
 .hf-hero .hf-primary:hover { background: white; }
 .hf-hero .hf-glass { background: #ffffff0c; backdrop-filter: blur(12px); border-color: #ffffff38; }
 .hf-carousel-controls { right: var(--hf-gutter); bottom: 38px; gap: 12px; }
-.hf-carousel-position { font-size: 13px; color: #b6c0c3; font-variant-numeric: tabular-nums; letter-spacing: 2px; margin-right: 10px; }
+.hf-carousel-position { font-size: 13px; color: #b6c0c3; font-variant-numeric: tabular-nums; letter-spacing: 2px; margin-right: 10px; white-space: nowrap; flex-shrink: 0; }
 .hf-carousel-controls .hf-icon-button { width: 40px; height: 40px; border-radius: 50%; border: 1px solid #ffffff2e; background: #0b0e1144; }
 .hf-carousel-dots { gap: 13px; padding: 0 6px; }
 .hf-carousel-dot { width: 5px; height: 5px; background: #ffffff50; }
@@ -207,6 +207,7 @@
     .hf-section h2 { font-size: 21px; }
     .hf-carousel-controls { gap: 6px; }
     .hf-carousel-position { letter-spacing: 0; font-size: 11px; }
+    .hf-carousel-dots { gap: 9px; }
 }
 @media (prefers-reduced-motion: reduce) {
     .hf-cover, .hf-cover img, .hf-cover-action { transition: none; }
