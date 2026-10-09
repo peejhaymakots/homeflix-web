@@ -2,6 +2,7 @@
 dist
 web
 node_modules
+/.homeflix-qa/
 
 # test coverage
 coverage

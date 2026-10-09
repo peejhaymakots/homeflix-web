@@ -83,6 +83,17 @@ class ServerConnections extends ConnectionManager {
      * @returns {Promise<import('jellyfin-apiclient').ConnectResponse>} The result of the connection attempt.
      */
     connect(options) {
+        // The dedicated LAN preview has one same-origin Jellyfin proxy.
+        // Fresh browsers should reach its login without configuring a server.
+        if (!this.getSavedServers().length && window.location.origin === 'http://172.16.110.6:8093') {
+            return this.connectToAddress(window.location.origin, {
+                enableAutoLogin: appSettings.enableAutoLogin(),
+                ...options
+            }).then(result => {
+                if (result.ApiClient) this.setLocalApiClient(result.ApiClient);
+                return result;
+            });
+        }
         return super.connect({
             enableAutoLogin: appSettings.enableAutoLogin(),
             ...options

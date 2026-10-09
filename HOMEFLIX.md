@@ -1,21 +1,13 @@
-# HomeFlix TV LAN preview
+# HomeFlix preview
 
-This fork is based on Jellyfin Web tag `v12.1` (`fae41f33eb7cd636a9ef68984adb82bb247a6e1b`), matching Jellyfin Server 12.1.0. Jellyfin's GPL-2.0-or-later license remains in LICENSE.
+Jellyfin Web 12.1 with a custom browser interface for the authenticated LAN preview.
 
-HomeFlix adds a responsive browsing experience, user-scoped library recommendations, multilingual spoiler-free summaries and Seerr Requests. Upstream playback, stream negotiation, subtitles, audio selection and settings remain available.
+The homepage includes HomeFlix AI, a controlled eight-second carousel, scoped library rails, series updates and grouped upcoming releases. Libraries use user-visible Jellyfin views; prerolls are hidden and Vivamax is isolated from general browsing and recommendations. A unified details dialog provides automatic multilingual summaries, rich metadata, movie versions, audio/subtitle selection and season/episode playback through the upstream player.
 
-## Build
+`src/homeflix/` contains the custom controllers, reusable UI, filters and styles. The companion `infojellyfin` gateway supplies authenticated configuration, enriched details, catalog lookups, recommendations and per-user summaries. Core playback and settings remain provided by Jellyfin.
 
-Use Node.js >=24 and npm >=11. Run `npm ci`, `npm run build:check`, then `npm run build:production`. The deployable assets are in `dist/`. Builds run off the shared LXC host.
+## Local checks
 
-## Backend
+Run `npm run build:check` and `npm run build:production`. Run `node tests/homeflix-ui.cjs` with `HOMEFLIX_PLAYWRIGHT_MODULE` pointing to an installed Playwright module and `HOMEFLIX_API_DIR` pointing to the gateway checkout. The fixture uses mocked services and never submits a live media request. Screenshots default to ignored `.homeflix-qa/`, configurable with `HOMEFLIX_QA_DIR`.
 
-The separate infojellyfin Worker provides `/api/frontend/*`, protected by a gateway secret and an exact frontend-origin allowlist. The Nginx instance exposes this as same-origin `/homeflix-api/*` and sends only the preview's Requests cookie. Library AI uses the viewer's Jellyfin token and fetches allowed candidates before inference. Restricted profiles cannot use external catalog discovery/Requests.
-
-The LAN preview uses `http://172.16.110.6:8093`; credentials travel over the trusted LAN using HTTP. Its Requests session has a separate encryption key, cookie name and `/homeflix-api` path. Production info-site cookie behavior remains unchanged. Never commit either gateway or session secrets.
-
-## Preview host
-
-The preview runs as the dedicated `homeflix-preview` user/service with one Nginx worker and a 256 MB memory limit. Static assets, runtime, logs and temporary files are confined to `/opt/homeflix-preview`. It has no database credentials. Existing applications, databases and scheduled jobs are not deployment targets.
-
-Rollbacks stop only `homeflix-preview` or switch its own `current` release symlink before restarting that service. Public-domain rollout is a separate step after LAN acceptance.
+Build off-host. Deploy compiled assets into a new versioned release under `/opt/homeflix-preview/releases/` and switch only `/opt/homeflix-preview/current`. Gateway changes deploy through GitHub main and Cloudflare Workers Builds. Shared applications, databases, dependencies and public media routing are outside this preview deployment.

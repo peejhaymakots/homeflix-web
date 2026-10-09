@@ -293,12 +293,10 @@ export default function (view, params) {
 
         apiClient.getPublicUsers().then(function (users) {
             if (users.length) {
-                showVisualForm();
                 loadUserList(view, apiClient, users);
-            } else {
-                view.querySelector('#txtManualName').value = '';
-                showManualForm(view, false, false);
             }
+            view.querySelector('#txtManualName').value = '';
+            showManualForm(view, users.length > 0, false);
         }).catch().then(function () {
             loading.hide();
         });

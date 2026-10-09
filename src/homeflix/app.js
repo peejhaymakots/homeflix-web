@@ -2,230 +2,89 @@ import { ServerConnections } from 'lib/jellyfin-apiclient';
 import Dashboard from 'utils/dashboard';
 import { playbackManager } from 'components/playback/playbackmanager';
 import { homeflixApi } from './api';
+import { node, action, iconAction, icon, select, safeImage, readUser, storeUser, readSession, storeSession, empty } from './ui';
+import { mediaGrid, mediaSection } from './cards';
+import { createCarousel } from './carousel';
+import { createAI } from './ai';
+import { createDetails } from './details';
+import { libraryFilterFields, libraryParams, openFilters, filterCount, filterChips } from './filters';
 import './homeflix.scss';
 
-const el = (tag, cls, content) => {
-    const node = document.createElement(tag);
-    if (cls) node.className = cls;
-    if (content !== undefined) node.textContent = String(content);
-    return node;
-};
-const button = (label, action, cls = 'hf-button') => {
-    const node = el('button', cls, label);
-    node.type = 'button';
-    node.addEventListener('click', action);
-    return node;
-};
-const safeImage = value => {
-    try { const url = new URL(value, location.origin); return [location.origin, 'https://image.tmdb.org', 'https://artworks.thetvdb.com'].includes(url.origin) ? url.href : ''; } catch { return ''; }
-};
+const librarySorts=[['SortName','Title'],['Random','Random'],['CommunityRating','Community rating'],['CriticRating','Critic rating'],['DateCreated','Date added'],['DatePlayed','Last played'],['OfficialRating','Parental rating'],['PlayCount','Play count'],['PremiereDate','Release date'],['Runtime','Runtime']];
 
 export function createHomeflix(root) {
-    let client, userId, active = false, generation = 0, searchTimer, requestController, summaryTimer;
-    let currentView = 'home', catalogAllowed = false, requestReady = false, gatewayError = '', language = 'english', currentDialog, summaryGeneration = 0, summaryCooldown = 0;
-    let aiPrompt = '', aiHistory = [], aiPage = 1, aiStudio, aiCatalog = false, browsePage = 1, aiCooldown = 0;
-    const libraryItems = new Map();
-    const key = () => `homeflix.list.${client.serverId()}.${userId}`;
-    const loadList = () => { try { return JSON.parse(localStorage.getItem(key()) || '[]').slice(0, 200); } catch { return []; } };
-    const savedId = item => item.library ? `jf:${item.id}` : `tmdb:${item.type}:${item.id || item.tmdbId}`;
-    const toggleList = item => {
-        const entries = loadList(); const id = savedId(item); const existing = entries.findIndex(x => x.key === id);
-        if (existing >= 0) entries.splice(existing, 1); else entries.push({ key: id, id: item.id || item.tmdbId, type: item.type, library: !!item.library });
-        localStorage.setItem(key(), JSON.stringify(entries.slice(-200)));
-        message(existing >= 0 ? 'Removed from My List.' : 'Saved to My List.');
-    };
-    root.innerHTML = `<div class="hf-app">
-      <header class="hf-header"><button type="button" class="hf-brand" aria-label="HomeFlix home">HomeFlix<span>TV</span></button><nav class="hf-nav" aria-label="HomeFlix navigation"></nav><div class="hf-user-tools"></div></header>
-      <main><section class="hf-hero" aria-label="Featured title"></section>
-      <div class="hf-content"><div class="hf-heading"><div><p class="hf-eyebrow">YOUR NEXT GREAT WATCH</p><h1>Welcome to HomeFlix</h1></div><div class="hf-search"><label class="hf-sr-only" for="hf-search">Search movies and series</label><input id="hf-search" type="search" placeholder="Search movies and series…" autocomplete="off"><button type="button" class="hf-search-clear" aria-label="Clear search">×</button></div></div>
-      <div class="hf-status" role="status" aria-live="polite"></div><div class="hf-controls"></div><div class="hf-results"></div></div></main>
-      <footer>HomeFlix TV <span>Powered by Jellyfin · Local preview</span></footer></div>`;
-    const nav = root.querySelector('.hf-nav'), results = root.querySelector('.hf-results'), controls = root.querySelector('.hf-controls');
-    const heading = root.querySelector('h1'), hero = root.querySelector('.hf-hero'), status = root.querySelector('.hf-status'), search = root.querySelector('#hf-search');
-    const message = value => { status.textContent = value || ''; };
-    const clear = () => { generation++; requestController?.abort(); requestController = new AbortController(); controls.replaceChildren(); results.replaceChildren(); message(''); hero.hidden = true; };
-    const libraryQuery = options => client.getItems(userId, { Recursive: true, IncludeItemTypes: 'Movie,Series', Fields: 'Overview,Genres,ProviderIds', EnableUserData: true, Limit: 40, ...options });
-    const api = (path, body) => homeflixApi(path, body, { client, signal: requestController?.signal });
-    const image = (item, type = 'Primary') => safeImage(client.getImageUrl(item.Id, { type, maxWidth: type === 'Backdrop' ? 1600 : 400, quality: 90 }));
-    function normalize(item) {
-        libraryItems.set(item.Id, item);
-        const title = item.Type === 'Episode' && item.SeriesName ? `${item.SeriesName} · S${item.ParentIndexNumber ?? 0} E${item.IndexNumber ?? 0} · ${item.Name}` : item.Name;
-        return { id: item.Id, title, year: item.ProductionYear, overview: item.Overview, genres: item.Genres || [],
-            rating: item.CommunityRating, type: item.Type === 'Movie' ? 'movie' : 'tv', library: true, poster: image(item),
-            jellyfinId: item.Id, progress: item.UserData?.PlayedPercentage || 0, raw: item };
+    let client,userId,active=false,generation=0,pageController,searchTimer,details,carouselCleanup,aiCleanup,returnDetails,loggedOut=false,upcomingGeneration=-1;
+    let libraries=[],catalogAllowed=false,requestReady=false,integrationReady=false,discoveryFields={},currentView='home',selectedLibrary='',discoverView='discover',language='english',restoreScroll=0;
+    const browsing=new Map(),aiState={prompt:'',source:'library',scope:'general',language:'english',type:'movie',items:[]};
+    const app=node('div','hf-app');const nav=node('nav','hf-nav');nav.setAttribute('aria-label','Main navigation');
+    const brand=action('HomeFlix',()=>navigate('home'),'hf-brand');brand.append(node('span','hf-brand-dot'));
+    const tools=node('div','hf-user-tools');const header=node('header','hf-header',brand,nav,tools);
+    const main=node('main');const aiHost=node('div','hf-ai-host');const hero=node('section','hf-hero');hero.hidden=true;const content=node('div','hf-content');
+    const heading=node('h1','hf-page-title');const controls=node('div','hf-controls');const status=node('div','hf-status');status.setAttribute('role','status');const results=node('div','hf-results');const shortcuts=node('div','hf-library-shortcuts');
+    const search=node('input');search.type='search';search.placeholder='Search your library';search.setAttribute('aria-label','Search your library');const searchBox=node('div','hf-search',search,iconAction('Clear search',()=>{search.value='';navigate(currentView);},'close'));searchBox.hidden=true;
+    content.append(node('div','hf-page-heading',heading,searchBox),shortcuts,status,controls,results);main.append(aiHost,hero,content);app.append(header,main,node('footer','hf-footer',node('span','','HomeFlix'),node('span','','LAN preview')));root.replaceChildren(app);
+    const userKey=part=>`homeflix.${part}.${client.serverId()}.${userId}`;
+    const loadList=()=>readUser(userKey('list'),[]).slice(0,200);
+    const savedId=item=>item.library?`jf:${item.id}`:`tmdb:${item.type}:${item.id || item.tmdbId}`;
+    const isSaved=item=>loadList().some(x=>x.key===savedId(item));
+    function toggleList(item){const entries=loadList();const id=savedId(item);const index=entries.findIndex(x=>x.key===id);if(index>=0)entries.splice(index,1);else entries.push({key:id,id:item.id || item.tmdbId,type:item.type,library:!!item.library});storeUser(userKey('list'),entries.slice(-200));}
+    const api=(path,body,signal)=>homeflixApi(path,body,{client,signal:signal || pageController?.signal});
+    const image=(raw,type='Primary')=>safeImage(client.getImageUrl(raw.Id,{type,maxWidth:type==='Backdrop'?1600:480,quality:90}));
+    function normalize(raw){const episode=raw.Type==='Episode';const seriesImage=episode&&raw.SeriesId&&raw.SeriesPrimaryImageTag?client.getImageUrl(raw.SeriesId,{type:'Primary',tag:raw.SeriesPrimaryImageTag,maxWidth:480}):null;return {id:raw.Id,title:episode?`${raw.SeriesName || raw.Name} · ${raw.Name}`:raw.Name,year:raw.ProductionYear,overview:raw.Overview || '',genres:raw.Genres || [],rating:raw.CommunityRating,type:raw.Type==='Movie'?'movie':'tv',library:true,jellyfinId:raw.Id,poster:safeImage(seriesImage || image(raw)),backdrop:image(raw,episode?'Primary':'Backdrop'),progress:raw.UserData?.PlayedPercentage || 0,episodeLabel:episode?`S${raw.ParentIndexNumber || 0} E${raw.IndexNumber || 0}`:'',raw};}
+    const query=(options={})=>client.getItems(userId,{Recursive:true,Fields:'Overview,Genres,ProviderIds,People,MediaSources,Studios,DateCreated',EnableUserData:true,Limit:40,...options});
+    function allowedViews(id='general'){return id==='general'?libraries.filter(x=>!x.vivamax):libraries.filter(x=>x.id===id);}
+    function filterGeneral(items){return items.filter(raw=>!(raw.Studios || []).some(studio=>/\b(?:vivamax|vmx)\b/i.test(studio.Name || '')));}
+    async function scopedQuery(id,options={}){const views=allowedViews(id).filter(x=>!options.IncludeItemTypes || options.IncludeItemTypes==='Episode'&&x.kind==='Series' || options.IncludeItemTypes.split(',').includes(x.kind));const batches=await Promise.allSettled(views.map(view=>query({...options,ParentId:view.id})));const items=[...new Map(batches.filter(x=>x.status==='fulfilled').flatMap(x=>x.value.Items || []).map(raw=>[raw.Id,raw])).values()];if(!batches.some(x=>x.status==='fulfilled')&&views.length)throw new Error('Your library is temporarily unavailable. Try again.');const visible=id==='general'?filterGeneral(items):items;if(options.SortBy==='DateCreated')visible.sort((a,b)=>Date.parse(b.DateCreated || 0)-Date.parse(a.DateCreated || 0));return visible.slice(0,options.Limit || 40);}
+    async function resumeItems(id='general'){const batches=await Promise.allSettled(allowedViews(id).map(view=>client.ajax({type:'GET',url:client.getUrl(`Users/${userId}/Items/Resume`,{ParentId:view.id,Limit:12,MediaTypes:'Video',Fields:'Overview,Genres,ProviderIds,Studios'}),dataType:'json'})));const raw=[...new Map(batches.filter(x=>x.status==='fulfilled').flatMap(x=>x.value.Items || []).map(item=>[item.Id,item])).values()];return (id==='general'?filterGeneral(raw):raw).slice(0,12).map(normalize);}
+    function rememberLanguage(value){language=value;aiState.language=value;storeUser(userKey('language'),value);}
+    function viewDetails(item){details.show(item);}
+    async function play(item,options){if(!item.raw || item.raw.Type==='Series'){viewDetails(item);return;}returnDetails=item;details.close();try{await playbackManager.play({ids:[item.raw.Id],serverId:client.serverId(),startPositionTicks:item.raw.UserData?.PlaybackPositionTicks || 0,...options});}catch(error){status.textContent=error.message;returnDetails=null;}}
+    async function hydrate(items,library=false){if(!library)return items;const ids=items.map(item=>item.id).filter(Boolean);if(!ids.length)return [];const data=await query({Ids:ids.join(','),IncludeItemTypes:'Movie,Series,Episode',Limit:ids.length});return data.Items.map(normalize);}
+    function mountAI(host,scope='general'){if(scope==='general'&&libraries.find(x=>x.id===aiState.scope)?.vivamax)aiState.scope='general';aiCleanup=createAI(host,{state:aiState,libraries,scope,catalogAllowed,requestReady,api,hydrate,details:viewDetails,onLanguage:rememberLanguage,onScope:id=>{if(libraries.find(x=>x.id===id)?.vivamax){selectedLibrary=id;navigate('libraries');}}});}
+    async function upcoming(ticket){if(!catalogAllowed||ticket!==generation||currentView!=='home'||upcomingGeneration===ticket)return;upcomingGeneration=ticket;try{const data=await api('upcoming');if(active&&ticket===generation){const grouped=new Map();data.items.forEach(item=>{const key=`${item.type}:${item.tmdbId || item.title}`;if(!grouped.has(key))grouped.set(key,{...item,id:item.tmdbId,title:item.title.split(' · S')[0]});});const section=mediaSection('Coming Soon',[...grouped.values()].slice(0,16),viewDetails);section.dataset.upcoming='true';results.append(section);}}catch{/* Optional release metadata never blocks browsing. */}}
+    function clear(){generation++;pageController?.abort();pageController=new AbortController();carouselCleanup?.();aiCleanup?.();carouselCleanup=null;aiCleanup=null;aiHost.replaceChildren();hero.replaceChildren();hero.hidden=true;heading.textContent='';controls.replaceChildren();results.replaceChildren();shortcuts.replaceChildren();status.textContent='';}
+    function renderShortcuts(){libraries.forEach(view=>shortcuts.append(action(view.name,()=>{selectedLibrary=view.id;navigate('libraries');},`hf-library-chip${view.id===selectedLibrary&&currentView==='libraries'?' hf-selected':''}`)));}
+    async function home(){const ticket=generation;heading.textContent='';mountAI(aiHost);renderShortcuts();status.textContent='Loading your library…';const [movies,resume,episodes]=await Promise.allSettled([scopedQuery('general',{IncludeItemTypes:'Movie',SortBy:'DateCreated',SortOrder:'Descending',Limit:24}),resumeItems(),scopedQuery('general',{IncludeItemTypes:'Episode',SortBy:'DateCreated',SortOrder:'Descending',Limit:40})]);if(!active||ticket!==generation)return;status.textContent='';const latest=movies.status==='fulfilled'?movies.value.map(normalize):[];carouselCleanup=createCarousel(hero,latest,{play,details:viewDetails});if(resume.status==='fulfilled'&&resume.value.length)results.append(mediaSection('Continue Watching',resume.value,viewDetails,undefined,true));results.append(mediaSection('New movies',latest,viewDetails,()=>{selectedLibrary=libraries.find(x=>x.name==='Movies')?.id || '';navigate('libraries');}));
+        const specials=libraries.filter(view=>/filipino|anime/i.test(view.name));await Promise.allSettled(specials.map(async view=>{const raw=await scopedQuery(view.id,{IncludeItemTypes:view.kind,SortBy:'DateCreated',SortOrder:'Descending',Limit:12});if(active&&ticket===generation)results.append(mediaSection(view.name,raw.map(normalize),viewDetails,()=>{selectedLibrary=view.id;navigate('libraries');}));}));
+        if(active&&ticket===generation&&episodes.status==='fulfilled'){const grouped=new Map();episodes.value.forEach(raw=>{if(!raw.SeriesId)return;const existing=grouped.get(raw.SeriesId);if(existing)existing.count++;else grouped.set(raw.SeriesId,{raw,count:1});});const series=await Promise.allSettled([...grouped.values()].slice(0,12).map(async({raw,count})=>{const full=await client.getItem(userId,raw.SeriesId);return {...normalize(full),episodeLabel:`${count} new episode${count>1?'s':''}`};}));if(active&&ticket===generation&&series.some(x=>x.status==='fulfilled'))results.append(mediaSection('Series updates',series.filter(x=>x.status==='fulfilled').map(x=>x.value),viewDetails));}
+        await upcoming(ticket);
+        if(movies.status==='rejected')status.textContent=movies.reason.message;
     }
-    function card(item) {
-        const article = el('article', 'hf-card');
-        const cover = button('', () => showDetails(item), 'hf-cover'); cover.setAttribute('aria-label', `Details for ${item.title}`);
-        const poster = safeImage(item.poster);
-        if (poster) { const img = el('img'); img.src = poster; img.alt = ''; img.loading = 'lazy'; img.addEventListener('error', () => img.remove(), { once: true }); cover.append(img); }
-        cover.append(el('span', 'hf-cover-fallback', item.title));
-        if (item.progress) { const bar = el('span', 'hf-progress'); bar.style.width = `${Math.min(100, item.progress)}%`; cover.append(bar); }
-        const flag = item.library ? 'IN YOUR LIBRARY' : item.releaseDate ? new Date(item.releaseDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : item.availability || 'DISCOVER';
-        article.append(cover, el('span', 'hf-badge', flag), button(item.title, () => showDetails(item), 'hf-card-title'), el('p', 'hf-card-meta', [item.year, item.type === 'tv' ? 'Series' : 'Movie', item.rating ? `★ ${Number(item.rating).toFixed(1)}` : ''].filter(Boolean).join(' · ')));
-        return article;
+    function browseState(id){if(!browsing.has(id))browsing.set(id,{...readUser(userKey(`filters.${id}`),{SortBy:'SortName',SortOrder:'Ascending'}),page:1,mode:'titles'});return browsing.get(id);}
+    async function browse(){if(!selectedLibrary || !libraries.some(x=>x.id===selectedLibrary))selectedLibrary=libraries.find(x=>!x.vivamax)?.id;const view=libraries.find(x=>x.id===selectedLibrary);heading.textContent=view?.name || 'Libraries';renderShortcuts();if(!view){results.append(empty('No accessible libraries.'));return;}const state=browseState(view.id);const ticket=generation;let fields=libraryFilterFields({},[],view.kind);let page=1,loading=false;
+        if(view.vivamax){mountAI(aiHost,view.id);try{const continued=await resumeItems(view.id);if(active&&ticket===generation&&continued.length)results.append(mediaSection('Continue Watching · Vivamax',continued,viewDetails,undefined,true));}catch{/* Continue Watching is optional. */}}
+        const gridHost=node('div','hf-library-results');results.append(gridHost);const count=node('span','hf-result-count');const sortOptions=[...librarySorts,...(view.kind==='Series'?[['DateLastContentAdded','Latest episode added'],['SeriesDatePlayed','Series last played']]:[])];
+        const sort=select('Sort library',sortOptions,state.SortBy,value=>{state.SortBy=value;load(true);});const direction=select('Sort direction',[['Ascending','Ascending'],['Descending','Descending']],state.SortOrder,value=>{state.SortOrder=value;load(true);});
+        const filterButton=action('Filters',()=>openFilters({title:`Filter ${view.name}`,fields,values:state,lookup:async()=>[],onApply:values=>{Object.assign(state,values);Object.keys(state).filter(key=>!['SortBy','SortOrder','page','mode'].includes(key)&&!Object.hasOwn(values,key)).forEach(key=>delete state[key]);load(true);}}),'hf-button','sliders');const chips=node('div');const reset=action('Reset',()=>{browsing.delete(view.id);storeUser(userKey(`filters.${view.id}`),{SortBy:'SortName',SortOrder:'Ascending'});navigate('libraries');},'hf-text-button');controls.append(sort,direction,filterButton,reset,count,chips);
+        if(view.kind==='Series')controls.prepend(select('Browse series or episodes',[['titles','Series'],['episodes','Episodes']],state.mode,value=>{state.mode=value;navigate('libraries');}));
+        const type=state.mode==='episodes'?'Episode':view.kind;
+        Promise.allSettled([client.ajax({type:'GET',url:client.getUrl('Items/Filters',{UserId:userId,ParentId:view.id,IncludeItemTypes:type}),dataType:'json'}),client.ajax({type:'GET',url:client.getUrl('Items/Filters2',{UserId:userId,ParentId:view.id,IncludeItemTypes:type}),dataType:'json'}),client.ajax({type:'GET',url:client.getUrl('Studios',{UserId:userId,ParentId:view.id,IncludeItemTypes:type}),dataType:'json'})]).then(data=>{if(ticket!==generation)return;const first=data[0].status==='fulfilled'?data[0].value:{};const second=data[1].status==='fulfilled'?data[1].value:{};fields=libraryFilterFields({...first,...second},data[2].status==='fulfilled'?data[2].value.Items || []:[],type);updateChips();});
+        function updateChips(){filterButton.replaceChildren(`Filters${filterCount(fields,state)?` (${filterCount(fields,state)})`:''}`);chips.replaceChildren(filterChips(fields,state,name=>{delete state[name];load(true);}));}
+        async function load(resetPage){if(loading)return;loading=true;if(resetPage){page=1;state.page=1;gridHost.replaceChildren();}status.textContent='Loading titles…';updateChips();storeUser(userKey(`filters.${view.id}`),state);try{const data=await query({ParentId:view.id,IncludeItemTypes:type,StartIndex:(page-1)*40,...libraryParams(state)});if(!active||ticket!==generation)return;gridHost.querySelector('.hf-more')?.remove();gridHost.append(mediaGrid(data.Items.map(normalize),viewDetails));count.textContent=`${data.TotalRecordCount || 0} titles`;status.textContent='';state.page=page;if(page*40<data.TotalRecordCount)gridHost.append(action('Load more',()=>{page++;load(false);},'hf-button hf-more'));}catch(error){if(active&&ticket===generation)status.textContent=error.message;}finally{loading=false;}}
+        const previousPage=Math.min(state.page || 1,10);await load(true);for(let i=2;i<=previousPage&&active&&ticket===generation;i++){page=i;await load(false);}
     }
-    function grid(items, target = results, rail = false) {
-        const node = el('div', rail ? 'hf-rail' : 'hf-grid');
-        items.forEach(item => node.append(card(item)));
-        target.append(node);
-        if (!items.length) target.append(el('p', 'hf-empty', 'No titles to show here yet.'));
+    async function reconnect(){heading.textContent='Connect Requests';const form=node('form','hf-reconnect',node('h2','','Connect your Requests account'),node('p','hf-muted','Sign in with your Jellyfin account to discover and request titles.'));const name=node('input');name.placeholder='Username';name.autocomplete='username';name.required=true;name.setAttribute('aria-label','Requests username');const password=node('input');password.type='password';password.placeholder='Password';password.autocomplete='current-password';password.required=true;password.setAttribute('aria-label','Requests password');const submit=node('button','hf-button hf-primary','Connect Requests');submit.type='submit';form.append(name,password,submit);results.append(form);form.addEventListener('submit',async event=>{event.preventDefault();submit.disabled=true;try{await api('requests/login',{username:name.value,password:password.value});requestReady=true;sessionStorage.removeItem('homeflix.requests.error');navigate('discover');}catch(error){status.textContent=error.message;}finally{password.value='';submit.disabled=false;}});}
+    async function discover(){heading.textContent=currentView==='requests'?'My Requests':'Discover';if(!integrationReady){results.append(empty('Connecting discovery…'));return;}if(!catalogAllowed){results.append(empty('Discovery is unavailable for this profile.','Your permitted Jellyfin libraries remain available.'));return;}if(!requestReady){await reconnect();return;}const ticket=generation;let page=1;const view=currentView==='requests'?'mine':discoverView;const state=browseState(`discover.${view}`);let fields=discoveryFields[view] || [];const gridHost=node('div');results.append(gridHost);const chips=node('div');
+        if(view!=='mine'){const tabs=node('div','hf-tabs');[['discover','Trending'],['movies','Movies'],['series','Series']].forEach(([id,label])=>{const tab=action(label,()=>{discoverView=id;navigate('discover');},'hf-tab');tab.setAttribute('aria-selected',String(id===view));tabs.append(tab);});controls.append(tabs,action('My Requests',()=>navigate('requests'),'hf-text-button'));if(view!=='discover'){const sortField=fields.find(x=>x.name==='sortBy');controls.append(select('Sort discovery',Object.entries(sortField.options),state.sortBy || sortField.default,value=>{state.sortBy=value;load(true);}),action(`Filters${filterCount(fields,state)?` (${filterCount(fields,state)})`:''}`,()=>openFilters({title:'Discover filters',fields,values:state,lookup:async(kind,q,signal,draft)=>(await api(`requests/lookup?${new URLSearchParams({kind,type:view==='series'?'tv':'movie',...(q?{q}:{}),...(kind==='providers'?{region:draft.watchRegion || 'PH'}:{})})}`,undefined,signal)).items,onApply:values=>{browsing.set(`discover.${view}`,{...values,page:1});navigate('discover');}}),'hf-button','sliders'),action('Reset',()=>{browsing.delete(`discover.${view}`);storeUser(userKey(`filters.discover.${view}`),{});navigate('discover');},'hf-text-button'),chips);}}
+        async function load(resetPage){if(resetPage){page=1;gridHost.replaceChildren();}status.textContent='Loading the catalog…';chips.replaceChildren(filterChips(fields,state,name=>{delete state[name];load(true);}));storeUser(userKey(`filters.discover.${view}`),state);try{const params=new URLSearchParams({view,page:String(page)});if(view!=='discover'&&view!=='mine')fields.forEach(field=>{if(state[field.name])params.set(field.name,state[field.name]);});const data=await api(view==='mine'?`requests/mine?page=${page}`:`requests/browse?${params}`);if(!active||ticket!==generation)return;status.textContent='';gridHost.querySelector('.hf-more')?.remove();if(view==='mine'){data.items.forEach(item=>gridHost.append(node('article','hf-request-row',node('div','',node('h3','',item.title || `Request ${item.id}`),node('p','hf-muted',item.status)),action('Details',()=>viewDetails({id:item.mediaId,type:item.type,title:item.title || 'Requested title'})))));if(!data.items.length)gridHost.append(empty('No requests yet.'));}else gridHost.append(mediaGrid(data.items,viewDetails));if(data.nextPage)gridHost.append(action('Load more',()=>{page=data.nextPage;load(false);},'hf-button hf-more'));}catch(error){if(error.name!=='AbortError'&&active&&ticket===generation){if(error.status===401){requestReady=false;results.replaceChildren();reconnect();}status.textContent=error.message;}}}
+        await load(true);
     }
-    function section(title, items) { const node = el('section', 'hf-section'); node.append(el('h2', '', title)); grid(items, node, true); results.append(node); }
-    function actionError(error) { if (error.name !== 'AbortError') message(error.message); }
-    function play(item) {
-        const raw = item.raw || libraryItems.get(item.jellyfinId);
-        closeDetails();
-        if (raw && raw.Type !== 'Series') {
-            raw.ServerId = client.serverId();
-            playbackManager.play({ ids: [raw.Id], serverId: client.serverId(), startPositionTicks: raw.UserData?.PlaybackPositionTicks || 0 }).catch(actionError);
-        } else Dashboard.navigate(`details?id=${encodeURIComponent(item.jellyfinId || item.id)}&serverId=${client.serverId()}`);
-    }
-    async function home() {
-        const ticket = generation;
-        heading.textContent = 'Your movie night starts here'; message('Loading your library…');
-        const [latest, resume, series] = await Promise.allSettled([
-            libraryQuery({ SortBy: 'DateCreated', SortOrder: 'Descending', IncludeItemTypes: 'Movie', Limit: 20 }),
-            client.ajax({ type: 'GET', url: client.getUrl(`Users/${userId}/Items/Resume`, { Limit: 12, MediaTypes: 'Video', Fields: 'Overview,Genres,ProviderIds' }), dataType: 'json' }),
-            libraryQuery({ SortBy: 'DateCreated', SortOrder: 'Descending', IncludeItemTypes: 'Episode', Limit: 20 })
-        ]);
-        if (ticket !== generation || !active) return;
-        message('');
-        const movies = latest.status === 'fulfilled' ? latest.value.Items.map(normalize) : [];
-        const continued = resume.status === 'fulfilled' ? resume.value.Items.map(normalize) : [];
-        const episodes = series.status === 'fulfilled' ? series.value.Items.map(normalize) : [];
-        if (movies[0]) {
-            hero.replaceChildren(); hero.hidden = false;
-            const featured = movies[0]; const backdrop = safeImage(image(featured.raw, 'Backdrop'));
-            if (backdrop) hero.style.backgroundImage = `linear-gradient(90deg,#0a1012 4%,rgba(10,16,18,.78) 42%,rgba(10,16,18,.12)),linear-gradient(0deg,#0a1012,transparent 70%),url("${backdrop}")`;
-            const copy = el('div', 'hf-hero-copy'); copy.append(el('p', 'hf-eyebrow', 'NEW ON HOMEFLIX'), el('h2', '', featured.title), el('p', 'hf-hero-meta', [featured.year, ...featured.genres.slice(0, 3)].join(' · ')), el('p', 'hf-hero-description', featured.overview || 'Something new for your next movie night.'));
-            const actions = el('div', 'hf-actions'); actions.append(button('▶ Watch now', () => play(featured), 'hf-button hf-primary'), button('More details', () => showDetails(featured))); copy.append(actions); hero.append(copy);
-        }
-        if (continued.length) section('Continue Watching', continued);
-        section('Recently Added Movies', movies); if (episodes.length) section('Latest Episodes', episodes);
-        if (catalogAllowed) {
-            try { const upcoming = await api('upcoming'); if (ticket === generation) section('Coming Soon', upcoming.items.map(x => ({ ...x, id: x.tmdbId }))); } catch { /* Core library remains usable. */ }
-            if (requestReady) {
-                try { const top = await api('requests/browse?view=movies&sortBy=vote_average.desc&voteCountGte=50'); if (ticket === generation) section('Highly Rated · Discover', top.items); } catch { /* Discovery never blocks playback. */ }
-            }
-        }
-        if (latest.status === 'rejected') message('The library could not load. Use Refresh to try again.');
-    }
-    async function browse(kind, reset = true) {
-        const ticket = generation; heading.textContent = kind === 'Movie' ? 'Movies' : 'Series';
-        if (reset) {
-            browsePage = 1;
-            const sort = el('select'); sort.setAttribute('aria-label', 'Sort library');
-            [['SortName','Title A–Z'],['DateCreated','Recently added'],['CommunityRating','Highest rated']].forEach(([value,label]) => { const o = el('option','',label); o.value=value; sort.append(o); });
-            const genre = el('input'); genre.placeholder = 'Genre (optional)'; genre.setAttribute('aria-label','Filter by genre');
-            const year = el('input'); year.type='number'; year.placeholder='Year'; year.min='1900'; year.max='2100'; year.setAttribute('aria-label','Filter by year');
-            controls.append(sort,genre,year,button('Apply',()=> { browsePage=1; results.replaceChildren(); load(); }));
-        }
-        async function load() {
-            const start = ++generation; message('Loading…'); const values=controls.querySelectorAll('select,input');
-            try {
-                const data = await libraryQuery({ IncludeItemTypes:kind, SortBy:values[0].value, SortOrder:values[0].value==='SortName'?'Ascending':'Descending', StartIndex:(browsePage-1)*40, Genres:values[1].value || undefined, Years:values[2].value || undefined });
-                if(start!==generation || !active)return; results.querySelector('.hf-more')?.remove(); grid(data.Items.map(normalize)); message('');
-                if((browsePage-1)*40+data.Items.length<data.TotalRecordCount)results.append(button('Load more',()=>{browsePage++;load();},'hf-button hf-more'));
-            }catch(error){actionError(error);}
-        }
-        if(ticket===generation)await load();
-    }
-    async function reconnect() {
-        if(!catalogAllowed){message(gatewayError || 'Catalog discovery and Requests are unavailable for this restricted profile.');return;}
-        heading.textContent='Connect Requests';
-        const form=el('form','hf-panel hf-reconnect'); form.append(el('h2','','Connect your HomeFlix requests'),el('p','','Your Jellyfin playback remains available. Sign in here to reconnect Requests.'));
-        const name=el('input');name.placeholder='Jellyfin username';name.autocomplete='username';name.required=true;name.setAttribute('aria-label','Jellyfin username');
-        const pass=el('input');pass.type='password';pass.placeholder='Password';pass.autocomplete='current-password';pass.required=true;pass.setAttribute('aria-label','Password');
-        const submit=el('button','hf-button hf-primary','Connect Requests');submit.type='submit';
-        form.append(name,pass,submit);results.append(form);
-        form.addEventListener('submit',async e=>{e.preventDefault();submit.disabled=true;try{await api('requests/login',{username:name.value,password:pass.value});pass.value='';requestReady=true;sessionStorage.removeItem('homeflix.requests.error');await navigate('discover');}catch(error){pass.value='';message(error.message);}finally{submit.disabled=false;}});
-    }
-    async function discover(view='discover', append=false) {
-        if(!requestReady)return reconnect();const ticket=generation;heading.textContent=view==='mine'?'My Requests':'Discover something new';
-        if(!append){browsePage=1;const tabs=el('div','hf-pills');[['discover','Trending'],['movies','Movies'],['series','Series']].forEach(([value,label])=>tabs.append(button(label,()=>{clear();discover(value);},value===view?'hf-button hf-primary':'hf-button')));if(view!=='mine')controls.append(tabs);}
-        message('Checking the catalog…');
-        try{const data=await api(view==='mine'?`requests/mine?page=${browsePage}`:`requests/browse?view=${view}&page=${browsePage}`);if(ticket!==generation)return;message('');results.querySelector('.hf-more')?.remove();
-            if(view==='mine'){data.items.forEach(item=>{const row=el('div','hf-request-row');row.append(el('h3','',item.title||`Request #${item.id}`),el('span','hf-badge',item.status),button('Details',()=>showDetails({id:item.mediaId,type:item.type,title:item.title||'Requested title'})));results.append(row);});if(!data.items.length)results.append(el('p','hf-empty','You have no requests yet.'));}
-            else grid(data.items);
-            if(data.nextPage)results.append(button('Load more',()=>{browsePage=data.nextPage;discover(view,true);},'hf-button hf-more'));
-        }catch(error){if(error.status===401){requestReady=false;results.replaceChildren();reconnect();}actionError(error);}
-    }
-    function ai() {
-        heading.textContent='Find your next watch';
-        const form=el('form','hf-ai-form hf-panel');form.append(el('p','hf-eyebrow','HOMEFLIX AI'),el('h2','','What are you in the mood for?'),el('p','','Describe a story, mood, actor, or studio. HomeFlix checks real titles before suggesting them.'));
-        const prompt=el('textarea');prompt.maxLength=500;prompt.rows=3;prompt.placeholder='A mystery series with clever twists…';prompt.setAttribute('aria-label','What would you like to watch?');prompt.value=aiPrompt;
-        const source=el('select');source.setAttribute('aria-label','Recommendation source');[['library','My available library'],['catalog','Discover and request']].forEach(([value,label])=>{if(value==='catalog'&&!catalogAllowed)return;const o=el('option','',label);o.value=value;source.append(o);});
-        const lang=el('select');lang.setAttribute('aria-label','AI language');[['english','English'],['tagalog','Tagalog'],['bisaya','Bisaya']].forEach(([value,label])=>{const o=el('option','',label);o.value=value;lang.append(o);});lang.value=language;
-        const media=el('select');media.setAttribute('aria-label','Media type');[['movie','Movies'],['tv','Series']].forEach(([value,label])=>{const o=el('option','',label);o.value=value;media.append(o);});
-        const submit=el('button','hf-button hf-primary','Find recommendations');submit.type='submit';const picks=el('div','hf-ai-picks');
-        const fields=el('div','hf-ai-options');fields.append(source,lang,media,submit);form.append(prompt,fields);controls.append(form);results.append(picks);
-        let previousSource='';let previousType='';
-        const resetPicks = () => { if (Date.now() >= aiCooldown) { submit.disabled=false; submit.textContent='Find recommendations'; } };
-        prompt.addEventListener('input', resetPicks); source.addEventListener('change', resetPicks); media.addEventListener('change', resetPicks); lang.addEventListener('change', resetPicks);
-        form.addEventListener('submit',async e=>{e.preventDefault();if(source.value==='catalog'&&!requestReady){results.replaceChildren();reconnect();return;}if(!prompt.value.trim())return;
-            if(prompt.value.trim()!==aiPrompt||source.value!==previousSource||media.value!==previousType){aiPrompt=prompt.value.trim();aiHistory=[];aiPage=1;aiStudio=undefined;aiCatalog=false;}previousSource=source.value;previousType=media.value;language=lang.value;
-            submit.disabled=true;const ticket=generation;message('Checking real titles for your next watch…');
-            try{const data=await api(source.value==='library'?'recommend':'requests/ai',{prompt:aiPrompt,exclude:aiHistory,language,type:media.value,...(source.value==='catalog'?{page:aiPage,...(aiStudio===undefined?{}:{studioId:aiStudio})}:{})});if(ticket!==generation)return;
-                if(data.studios?.length){picks.replaceChildren();data.studios.forEach(studio=>picks.append(button(`${studio.name} · ${studio.country||studio.originCountry||'Studio'}`,()=>{aiStudio=studio.id;submit.disabled=false;form.requestSubmit();},'hf-button hf-studio')));message(data.message);return;}
-                const items=data.items.map(x=>source.value==='library'?{...x,library:true,jellyfinId:x.id,poster:safeImage(client.getImageUrl(x.id,{type:'Primary',maxWidth:400}))}:x);
-                aiHistory.push(...items.map(x=>source.value==='library'?x.id:`${x.type}:${x.id}`));aiHistory=aiHistory.slice(-100);aiPage=data.nextPage;aiCatalog=data.catalog===true;picks.replaceChildren();grid(items,picks);message(data.message||data.reason||'Here are your picks.');submit.textContent=source.value==='catalog'&&aiCatalog?'Load more titles':'Find more picks';
-            }catch(error){actionError(error);if(error.retryAfter){aiCooldown=Date.now()+error.retryAfter*1000;setTimeout(()=>{if(active&&ticket===generation)submit.disabled=false;},error.retryAfter*1000);return;}}
-            finally{if(ticket===generation)submit.disabled=Date.now()<aiCooldown||(source.value==='catalog'&&aiPage===null&&aiHistory.length>0);}
-        });
-    }
-    function closeDetails(){summaryGeneration++;clearTimeout(summaryTimer);currentDialog?.close();currentDialog?.remove();currentDialog=null;}
-    async function showDetails(item) {
-        closeDetails(); const dialog=el('dialog','hf-dialog');currentDialog=dialog;let activeItem=item;
-        const body=el('div','hf-detail-body');dialog.append(button('×',closeDetails,'hf-close'));dialog.querySelector('.hf-close').setAttribute('aria-label','Close details');dialog.append(body);document.body.append(dialog);dialog.showModal();
-        dialog.addEventListener('close',()=>{summaryGeneration++;clearTimeout(summaryTimer);if(currentDialog===dialog)currentDialog=null;dialog.remove();});dialog.addEventListener('click',e=>{if(e.target===dialog)closeDetails();});
-        body.append(el('h2','',item.title),el('p','','Loading details…'));
-        try{
-            if(item.library||item.jellyfinId){const raw=await client.getItem(userId,item.jellyfinId||item.id);activeItem=normalize(raw);}
-            else if(item.id&&requestReady){const data=await homeflixApi(`requests/details?id=${Number(item.id)}&type=${item.type==='tv'?'tv':'movie'}`,undefined,{client});activeItem=data.item;}
-            if(!dialog.open||currentDialog!==dialog)return;body.replaceChildren();
-            if(activeItem.poster){const poster=el('img','hf-detail-poster');poster.src=safeImage(activeItem.poster);poster.alt='';body.append(poster);}
-            const content=el('div','hf-detail-content');content.append(el('p','hf-eyebrow',activeItem.library?'IN YOUR LIBRARY':activeItem.availability||'DISCOVER'),el('h2','',activeItem.title),el('p','hf-detail-meta',[activeItem.year,activeItem.type==='tv'?'Series':'Movie',...(activeItem.genres||[]).slice(0,4)].filter(Boolean).join(' · ')));
-            const actions=el('div','hf-actions');if(activeItem.library||activeItem.jellyfinId)actions.append(button('▶ Watch now',()=>play(activeItem),'hf-button hf-primary'));actions.append(button('＋ My List',()=>toggleList(activeItem)));content.append(actions);
-            const summary=el('section','hf-summary');summary.append(el('p','hf-eyebrow','SPOILER-FREE · HOMEFLIX AI'));const languages=el('div','hf-pills');const summaryText=el('p','hf-summary-text','Choose Generate for a spoiler-free summary.');const retry=button('Generate summary',()=>generateSummary());summary.append(languages,summaryText,retry);content.append(summary);
-            async function generateSummary(){const selectedLanguage=language;const ticket=++summaryGeneration;retry.disabled=true;const remaining=summaryCooldown-Date.now();if(remaining>0){summaryText.textContent='Waiting briefly before switching language…';clearTimeout(summaryTimer);summaryTimer=setTimeout(generateSummary,remaining+50);return;}
-                summaryText.textContent='Writing your spoiler-free summary…';try{const data=await homeflixApi('summary',{...(activeItem.library?{itemId:activeItem.id}:{tmdbId:Number(activeItem.id||activeItem.tmdbId),type:activeItem.type}),language:selectedLanguage},{client});if(ticket!==summaryGeneration||!dialog.open||selectedLanguage!==language)return;summaryText.textContent=data.summary||data.message;summaryCooldown=Date.now()+(data.cooldownSeconds||3)*1000;retry.textContent='Regenerate summary';}
-                catch(error){if(ticket!==summaryGeneration||!dialog.open)return;summaryText.textContent=error.message;retry.textContent='Try again';if(error.retryAfter)summaryCooldown=Date.now()+error.retryAfter*1000;}
-                finally{if(ticket===summaryGeneration&&dialog.open)retry.disabled=false;}}
-            [['english','English'],['tagalog','Tagalog'],['bisaya','Bisaya']].forEach(([value,label])=>{const b=button(label,()=>{language=value;languages.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));generateSummary();},'hf-language');b.setAttribute('aria-pressed',String(language===value));languages.append(b);});
-            const synopsis=el('details','hf-synopsis');synopsis.append(el('summary','','Full synopsis'),el('p','',activeItem.overview||'No synopsis is available.'));content.append(synopsis);
-            if(activeItem.library){content.append(button('Playback options & full details',()=>{closeDetails();Dashboard.navigate(`details?id=${encodeURIComponent(activeItem.id)}&serverId=${client.serverId()}`);}));
-                if(activeItem.raw.Type==='Series'){const seasons=await client.getSeasons(activeItem.id,{UserId:userId});if(!dialog.open)return;const rail=el('div','hf-season-list');seasons.Items.forEach(season=>rail.append(button(season.Name,()=>{closeDetails();Dashboard.navigate(`details?id=${season.Id}&serverId=${client.serverId()}`);})));content.append(el('h3','','Seasons'),rail);}}
-            else if(activeItem.canRequest&&requestReady){
-                const requestBox=el('div','hf-request-box');requestBox.append(el('h3','','Request this title'));const chosen=[];
-                if(activeItem.type==='tv')(activeItem.seasons||[]).forEach(season=>{const label=el('label','hf-season');const input=el('input');input.type='checkbox';input.disabled=!season.selectable;input.value=String(season.number);label.append(input,document.createTextNode(`Season ${season.number}${season.status?' · '+season.status:''}`));requestBox.append(label);chosen.push(input);});
-                const notice=el('p','','Nothing is requested until you confirm below.');requestBox.append(notice);const confirm=button('Confirm request',async()=>{const seasons=chosen.filter(x=>x.checked).map(x=>Number(x.value));if(activeItem.type==='tv'&&!seasons.length){notice.textContent='Choose at least one available season.';return;}confirm.disabled=true;try{const data=await homeflixApi('requests/submit',{type:activeItem.type,id:activeItem.id,...(activeItem.type==='tv'?{seasons}:{})},{client});notice.textContent=data.message;confirm.remove();}catch(error){notice.textContent=error.message;confirm.disabled=false;}},'hf-button hf-primary');requestBox.append(confirm);content.append(requestBox);
-            }
-            body.append(content);
-        }catch(error){if(dialog.open){body.replaceChildren(el('h2','',item.title),el('p','',error.message));}}
-    }
-    async function myList(){heading.textContent='My List';const ticket=generation;const entries=loadList();const items=[];
-        const ids=entries.filter(x=>x.library).map(x=>x.id);if(ids.length){const data=await libraryQuery({Ids:ids.join(','),IncludeItemTypes:'Movie,Series,Episode',Limit:200});items.push(...data.Items.map(normalize));}
-        if(catalogAllowed&&requestReady){for(const entry of entries.filter(x=>!x.library).slice(0,40)){try{const data=await api(`requests/details?id=${entry.id}&type=${entry.type}`);items.push(data.item);}catch{/* Inaccessible titles stay hidden. */}if(ticket!==generation)return;}}
-        if(ticket===generation)grid(items);
-    }
-    async function navigate(view){clear();currentView=view;search.value='';nav.querySelectorAll('button').forEach(b=>b.setAttribute('aria-current',b.dataset.view===view?'page':'false'));
-        try{if(view==='home')await home();else if(view==='movies'||view==='series')await browse(view==='movies'?'Movie':'Series');else if(view==='ai')ai();else if(view==='list')await myList();else await discover(view==='requests'?'mine':'discover');}catch(error){actionError(error);}}
-    [['home','Home'],['movies','Movies'],['series','Series'],['discover','Discover'],['ai','HomeFlix AI'],['requests','My Requests'],['list','My List']].forEach(([value,label])=>{const node=button(label,()=>navigate(value),'hf-nav-link');node.dataset.view=value;nav.append(node);});
-    root.querySelector('.hf-brand').addEventListener('click',()=>navigate('home'));
-    root.querySelector('.hf-search-clear').addEventListener('click',()=>{search.value='';navigate(currentView);});
-    async function searchTitles(){if(search.value.trim().length<2)return;const ticket=++generation;requestController?.abort();requestController=new AbortController();hero.hidden=true;controls.replaceChildren();results.replaceChildren();heading.textContent='Search results';message('Searching your library…');
-        try{const data=await libraryQuery({SearchTerm:search.value.trim(),Limit:40});if(ticket!==generation)return;grid(data.Items.map(normalize));message('');if(catalogAllowed&&requestReady){results.append(button('Search the request catalog',async()=>{const start=generation;try{const found=await api(`requests/search?q=${encodeURIComponent(search.value.trim())}`);if(start===generation){results.replaceChildren();grid(found.items);}}catch(error){actionError(error);}}));}}catch(error){actionError(error);}}
-    search.addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(searchTitles,300);});search.addEventListener('keydown',e=>{if(e.key==='Enter'){clearTimeout(searchTimer);searchTitles();}});
-    const tools=root.querySelector('.hf-user-tools');tools.append(button('Refresh',()=>navigate(currentView),'hf-tool'),button('Settings',()=>Dashboard.navigate('mypreferencesdisplay'),'hf-tool'),button('Sign out',async()=>{try{await homeflixApi('requests/logout',{}, {client});}catch{/* Jellyfin sign-out remains available. */}sessionStorage.removeItem('homeflix.requests.error');Dashboard.logout();},'hf-tool'));
+    async function myList(){heading.textContent='My List';const ticket=generation;const entries=loadList(),items=[];const ids=entries.filter(x=>x.library).map(x=>x.id);if(ids.length){const data=await query({Ids:ids.join(','),IncludeItemTypes:'Movie,Series,Episode',Limit:200});const general=new Set((await scopedQuery('general',{Ids:ids.join(','),IncludeItemTypes:'Movie,Series,Episode',Limit:200})).map(x=>x.Id));items.push(...data.Items.filter(raw=>general.has(raw.Id)).map(normalize));}if(catalogAllowed&&requestReady){for(const entry of entries.filter(x=>!x.library).slice(0,40)){try{const data=await api(`requests/details?id=${entry.id}&type=${entry.type}`);items.push(data.item);}catch{/* Missing titles stay hidden. */}if(ticket!==generation)return;}}if(ticket===generation)results.append(items.length?mediaGrid(items,viewDetails):empty('Your watchlist starts here.','Open a title and add it to My List.'));}
+    async function navigate(view){clearTimeout(searchTimer);details?.close();clear();currentView=view;search.value='';searchBox.hidden=true;nav.querySelectorAll('button').forEach(button=>button.setAttribute('aria-current',button.dataset.view===view?'page':'false'));try{if(view==='home')await home();else if(view==='libraries')await browse();else if(view==='list')await myList();else await discover();}catch(error){if(error.name!=='AbortError')status.textContent=error.message;}}
+    [['home','Home'],['libraries','Libraries'],['discover','Discover'],['list','My List']].forEach(([view,label])=>{const button=action(label,()=>navigate(view),'hf-nav-link');button.dataset.view=view;nav.append(button);});
+    const profile=node('details','hf-profile');const summary=node('summary','hf-icon-button');summary.setAttribute('aria-label','Account menu');summary.append(icon('user'));const menu=node('div','hf-profile-menu',action('My Requests',()=>{profile.open=false;navigate('requests');},'hf-menu-item'),action('Settings',()=>{profile.open=false;Dashboard.navigate('mypreferencesdisplay');},'hf-menu-item'),action('Refresh',()=>{profile.open=false;navigate(currentView);},'hf-menu-item'),action('Sign out',async()=>{loggedOut=true;details?.destroy();try{await homeflixApi('requests/logout',{}, {client});}catch{/* Jellyfin logout remains available. */}sessionStorage.removeItem('homeflix.requests.error');sessionStorage.removeItem(userKey('navigation'));aiState.items=[];Dashboard.logout();},'hf-menu-item'));profile.append(summary,menu);
+    tools.append(iconAction('Search library',()=>{searchBox.hidden=!searchBox.hidden;if(!searchBox.hidden){search.placeholder=currentView==='libraries'&&libraries.find(x=>x.id===selectedLibrary)?.vivamax?'Search Vivamax':'Search your library';search.focus();content.scrollIntoView({block:'start',behavior:'smooth'});}},'search'),profile);
+    async function searchTitles(){const term=search.value.trim();if(term.length<2)return;const view=currentView==='libraries'&&libraries.find(x=>x.id===selectedLibrary)?.vivamax?selectedLibrary:'general';const ticket=++generation;carouselCleanup?.();aiCleanup?.();aiHost.replaceChildren();hero.hidden=true;controls.replaceChildren();shortcuts.replaceChildren();results.replaceChildren();heading.textContent=view==='general'?'Search results':'Search Vivamax';status.textContent='Searching…';try{const items=await scopedQuery(view,{SearchTerm:term,IncludeItemTypes:'Movie,Series',Limit:80});if(ticket!==generation)return;results.append(mediaGrid(items.map(normalize),viewDetails));status.textContent='';if(catalogAllowed&&requestReady&&view==='general')results.append(action('Search Discover',async()=>{status.textContent='Searching Discover…';try{const data=await api(`requests/search?q=${encodeURIComponent(term)}`);if(ticket===generation){results.append(mediaSection('Discover results',data.items,viewDetails));status.textContent='';}}catch(error){status.textContent=error.message;}},'hf-button'));}catch(error){status.textContent=error.message;}}
+    search.addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(searchTitles,300);});search.addEventListener('keydown',event=>{if(event.key==='Enter'){clearTimeout(searchTimer);searchTitles();}});
     return {
-        async onResume(){active=true;client=ServerConnections.currentApiClient();userId=client.getCurrentUserId();document.documentElement.classList.add('homeflix-active');
-            const initialGeneration=generation;gatewayError='Connecting HomeFlix services…';requestController=new AbortController();
-            try{const config=await homeflixApi('config',undefined,{client});catalogAllowed=config.catalogAllowed;gatewayError='';try{await homeflixApi('requests/session',undefined,{client});requestReady=true;}catch{if(generation===initialGeneration)requestReady=false;}}
-            catch(error){if(generation===initialGeneration)requestReady=false;catalogAllowed=false;gatewayError=error.message;}
-            const waiting=status.textContent==='Connecting HomeFlix services…';
-            if(active&&(generation===initialGeneration||waiting))await navigate(currentView);},
-        onPause(){active=false;generation++;requestController?.abort();clearTimeout(searchTimer);closeDetails();document.documentElement.classList.remove('homeflix-active');},
-        destroy(){this.onPause();root.replaceChildren();}
+        async onResume(){active=true;client=ServerConnections.currentApiClient();const first=!userId;userId=client.getCurrentUserId();if(first){const saved=readSession(userKey('navigation'),{});currentView=saved.view || 'home';selectedLibrary=saved.library || '';discoverView=saved.discover || 'discover';restoreScroll=saved.scroll || 0;(saved.browsing || []).forEach(([key,value])=>browsing.set(key,value));if(saved.ai)Object.assign(aiState,saved.ai);if(saved.returnId){try{returnDetails=normalize(await client.getItem(userId,saved.returnId));}catch{/* A removed or inaccessible item is not reopened. */}}}language=readUser(userKey('language'),'english');aiState.language=language;document.documentElement.classList.add('homeflix-active');const ticket=generation;
+            details?.destroy();details=createDetails({client,userId,api,normalize,play,isSaved,toggleList,getLanguage:()=>language,setLanguage:rememberLanguage});
+            try{const local=await client.getUserViews({},userId);libraries=(local.Items || []).filter(x=>['movies','tvshows'].includes(x.CollectionType)&&!/preroll/i.test(x.Name)).map(x=>({id:x.Id,name:/anime/i.test(x.Name)?'Anime Series':x.Name,kind:x.CollectionType==='tvshows'?'Series':'Movie',vivamax:/\b(?:vivamax|vmx)\b/i.test(x.Name)}));}catch{/* Gateway configuration can also provide authorized views. */}
+            const configPromise=homeflixApi('config',undefined,{client,signal:AbortSignal.timeout(10000)}).then(config=>{catalogAllowed=config.catalogAllowed;libraries=config.libraries || libraries;discoveryFields=config.discoveryFilters || {};return homeflixApi('requests/session',undefined,{client,signal:AbortSignal.timeout(10000)}).then(()=>{requestReady=true;},()=>{requestReady=false;});}).catch(()=>{catalogAllowed=false;requestReady=false;}).finally(()=>{integrationReady=true;});
+            if(!active || ticket!==generation)return;await navigate(currentView);if(restoreScroll){root.closest('.page')?.scrollTo(0,restoreScroll);window.scrollTo(0,restoreScroll);restoreScroll=0;}if(returnDetails&&active){const item=returnDetails;returnDetails=null;details.show(item);}
+            const rendered=generation;configPromise.then(()=>{if(!active)return;if(rendered===generation&&currentView==='home')upcoming(rendered);if(['discover','requests'].includes(currentView)&&results.querySelector('.hf-empty'))navigate(currentView);else if(rendered===generation&&!document.activeElement?.closest('.hf-ai')&&!document.querySelector('dialog[open]')&&!aiState.busy&&['home','libraries'].includes(currentView)){const scope=currentView==='libraries'&&libraries.find(x=>x.id===selectedLibrary)?.vivamax?selectedLibrary:'general';if(currentView==='home'||scope!=='general'){aiCleanup?.();aiHost.replaceChildren();mountAI(aiHost,scope);}}});
+        },
+        onPause(){restoreScroll=root.closest('.page')?.scrollTop || window.scrollY;if(userId&&!loggedOut)storeSession(userKey('navigation'),{view:currentView,library:selectedLibrary,discover:discoverView,scroll:restoreScroll,browsing:[...browsing],returnId:returnDetails?.id,ai:{prompt:aiState.prompt,source:aiState.source,scope:aiState.scope,type:aiState.type,language:aiState.language}});active=false;generation++;pageController?.abort();clearTimeout(searchTimer);carouselCleanup?.();aiCleanup?.();details?.close();document.documentElement.classList.remove('homeflix-active');},
+        destroy(){this.onPause();details?.destroy();root.replaceChildren();}
     };
 }
