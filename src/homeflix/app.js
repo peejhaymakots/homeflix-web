@@ -1,6 +1,6 @@
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 import Dashboard from 'utils/dashboard';
-import playbackManager from 'components/playback/playbackmanager';
+import { playbackManager } from 'components/playback/playbackmanager';
 import { homeflixApi } from './api';
 import './homeflix.scss';
 
@@ -77,7 +77,7 @@ export function createHomeflix(root) {
         closeDetails();
         if (raw && raw.Type !== 'Series') {
             raw.ServerId = client.serverId();
-            playbackManager.play({ items: [raw], startPositionTicks: raw.UserData?.PlaybackPositionTicks || 0 });
+            playbackManager.play({ items: [raw], startPosition: raw.UserData?.PlaybackPositionTicks || 0 }).catch(actionError);
         } else Dashboard.navigate(`details?id=${encodeURIComponent(item.jellyfinId || item.id)}&serverId=${client.serverId()}`);
     }
     async function home() {
