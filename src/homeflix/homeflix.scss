@@ -15,3 +15,5 @@ body{background:var(--hf-bg)}.skinHeader{background:#0a1012f0!important}.button-
 @media(prefers-reduced-motion:reduce){.hf-cover{transition:none}.hf-cover:hover{transform:none}}
 
 body:has(.homeflix-page:not(.hide)) .skinHeader,body:has(.homeflix-page:not(.hide)) .mainDrawer,body:has(.homeflix-page:not(.hide)) .headerTabs{display:none!important}
+
+body:has(.homeflix-page:not(.hide)) .MuiAppBar-root,body:has(.homeflix-page:not(.hide)) .MuiToolbar-root{display:none!important}

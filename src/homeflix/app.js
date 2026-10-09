@@ -106,7 +106,7 @@ export function createHomeflix(root) {
         if (catalogAllowed) {
             try { const upcoming = await api('upcoming'); if (ticket === generation) section('Coming Soon', upcoming.items.map(x => ({ ...x, id: x.tmdbId }))); } catch { /* Core library remains usable. */ }
             if (requestReady) {
-                try { const top = await api('requests/browse?view=movies&sortBy=voteAverage.desc&voteCountGte=50'); if (ticket === generation) section('Highly Rated · Discover', top.items); } catch { /* Discovery never blocks playback. */ }
+                try { const top = await api('requests/browse?view=movies&sortBy=vote_average.desc&voteCountGte=50'); if (ticket === generation) section('Highly Rated · Discover', top.items); } catch { /* Discovery never blocks playback. */ }
             }
         }
         if (latest.status === 'rejected') message('The library could not load. Use Refresh to try again.');
