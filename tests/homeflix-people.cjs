@@ -79,6 +79,7 @@ let browser;
         for (const width of widths) {
             await page.setViewportSize({ width, height: 900 });
             assert.equal(await person.evaluate(dialog => dialog.scrollWidth > dialog.clientWidth), false, `Person overflow at ${width}`);
+            assert.equal(await person.evaluate(dialog => { const rect = dialog.getBoundingClientRect(); return rect.left < -1 || rect.right > innerWidth + 1; }), false, `Person extends beyond viewport at ${width}`);
         }
         await page.keyboard.press('Escape');
         await person.waitFor({ state: 'detached' });

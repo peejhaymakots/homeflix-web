@@ -22,7 +22,7 @@
 .hf-person-card:not(.hf-person-card-static):hover .hf-person-name { color: #8de4ce; }
 .hf-person-name { display: block; margin-top: 12px; font-size: 16px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
 .hf-person-role { display: block; margin: 5px 0 0; color: #bac8d4; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
-.hf-person-dialog { width: min(1100px, calc(100vw - 64px)); padding: 30px; background: #101720; color: #edf3f7; border-color: #425362; }
+.hf-person-dialog { box-sizing: border-box; width: min(1100px, calc(100vw - 64px)); padding: 30px; background: #101720; color: #edf3f7; border-color: #425362; }
 .hf-person-toolbar { margin-bottom: 24px; }
 .hf-person-back { display: inline-flex; gap: 10px; align-items: center; min-height: 44px; padding: 8px 0; border: 0; color: #bfeadb; background: transparent; font-size: 16px; }
 .hf-person-back svg { transform: rotate(180deg); }
