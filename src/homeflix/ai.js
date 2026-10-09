@@ -54,7 +54,7 @@ export function createAI(root,{state,scope='general',catalogAllowed,integration,
         const tm=state.items.map(item=>{const id=item.tmdbId || item.raw?.ProviderIds?.Tmdb || (!item.library?item.id:'');return id?`${item.type}:${id}`:'';}).filter(Boolean);
         state.branches.library.exclude=[...new Set([...state.branches.library.exclude,...jf])].slice(-100);
         state.branches.catalog.exclude=[...new Set([...state.branches.catalog.exclude,...tm])].slice(-100);
-        picks.replaceChildren();if(state.items.length){const grid=mediaGrid(state.items,details);[...grid.children].forEach((card,index)=>{const item=state.items[index];card.querySelector('.hf-availability')?.remove();card.append(node('span','hf-ai-availability',item.library?'Play':item.canRequest?'Request':item.availability || 'Requested'));});picks.append(grid);}
+        picks.replaceChildren();if(state.items.length){const grid=mediaGrid(state.items,details);[...grid.children].forEach((card,index)=>{const item=state.items[index];card.querySelector('.hf-availability')?.remove();card.append(node('span','hf-ai-availability',item.library?'Play':['Pending','Processing'].includes(item.availability)?item.availability:item.canRequest?'Request':item.availability || 'Requested'));});picks.append(grid);}
         status.textContent=state.message || '';updateControls();
     }
     function updateControls(){
