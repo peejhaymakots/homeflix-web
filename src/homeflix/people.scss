@@ -28,6 +28,7 @@
 .hf-person-back svg { transform: rotate(180deg); }
 .hf-person-toolbar .hf-icon-button { width: 44px; height: 44px; background: #263441; border: 1px solid #526675; color: #edf3f7; }
 .hf-person-header { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 30px; padding: 26px; border-radius: 16px; background: #1c2631; border: 1px solid #425362; }
+.hf-person-header.hf-studio-header { grid-template-columns: minmax(0, 1fr); }
 .hf-person-profile-portrait { align-self: start; }
 .hf-person-information { min-width: 0; }
 .hf-person-kicker { margin: 0 0 10px; color: #8de4ce; font-size: 12px; letter-spacing: 1.8px; font-weight: 700; }
@@ -45,6 +46,18 @@
 .hf-person-notice { color: #d5dfe7; font-size: 16px; line-height: 1.65; }
 .hf-person-notice:empty { display: none; }
 .hf-person-more, .hf-person-retry { margin-top: 22px; border-color: #526675; background: #101720; color: #bfeadb; }
+.hf-entity-controls { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-top: 20px; }
+.hf-entity-branch { min-width: 0; flex: 1 1 220px; }
+.hf-entity-branch .hf-person-notice { margin: 8px 0; }
+.hf-entity-branch .hf-button { margin-top: 8px; max-width: 100%; white-space: normal; }
+.hf-person-titles .hf-entity-availability { display: inline-flex; margin: 8px 0 0; padding: 5px 9px; border: 1px solid #718596; border-radius: 6px; background: #263441; color: #edf3f7; font-size: 13px; font-weight: 650; }
+.hf-person-titles .hf-entity-playable { background: #193a31; border-color: #60b69e; color: #b6f1df; }
+.hf-studio-section { margin-top: 28px; padding: 22px; border: 1px solid #425362; border-radius: 16px; background: #1c2631; }
+.hf-studio-section h3 { margin: 0 0 16px; font-size: 21px; color: #edf3f7; }
+.hf-studio-links { display: flex; flex-wrap: wrap; gap: 10px; }
+.hf-studio-link, .hf-studio-name { display: inline-flex; align-items: center; min-height: 44px; max-width: 100%; padding: 10px 14px; border: 1px solid #718596; border-radius: 8px; background: #101720; color: #d5efe7; font-size: 16px; line-height: 1.5; text-align: left; overflow-wrap: anywhere; }
+.hf-studio-link:hover { color: #b6f1df; border-color: #8de4ce; background: #193a31; }
+.hf-studio-link:focus-visible { outline: 2px solid #8de4ce; outline-offset: 4px; }
 .hf-person-dialog :focus-visible, .hf-people-section :focus-visible { outline: 2px solid #8de4ce; outline-offset: 4px; }
 @media (max-width: 1000px) {
     .hf-person-dialog { padding: 24px; }
@@ -54,6 +67,7 @@
 }
 @media (max-width: 600px) {
     .hf-people-section { padding: 18px; margin-top: 24px; border-radius: 12px; }
+    .hf-studio-section { padding: 18px; border-radius: 12px; }
     .hf-people-heading { gap: 8px; }
     .hf-people-heading h3 { font-size: 20px; }
     .hf-people-controls { gap: 5px; }

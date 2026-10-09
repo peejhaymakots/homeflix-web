@@ -18,7 +18,7 @@ const librarySorts=[['SortName','Title'],['Random','Random'],['CommunityRating',
 
 export function createHomeflix(root) {
     let client,userId,active=false,generation=0,pageController,searchTimer,details,carouselCleanup,aiCleanup,returnDetails,loggedOut=false,upcomingGeneration=-1;
-    let libraries=[],catalogAllowed=false,requestReady=false,integrationReady=false,discoveryFields={},currentView='home',selectedLibrary='',discoverView='discover',language='english',restoreScroll=0,restoreSearch='';
+    let libraries=[],catalogAllowed=false,requestReady=false,integrationReady=false,integrationFailed=false,integrationFlight,discoveryFields={},currentView='home',selectedLibrary='',discoverView='discover',language='english',restoreScroll=0,restoreSearch='';
     let aiState={prompt:'',language:'english',items:[]};const browsing=new Map(),aiStates=new Map([['general',aiState]]);
     const app=node('div','hf-app');const nav=node('nav','hf-nav');nav.setAttribute('aria-label','Main navigation');
     const brand=action('HomeFlix',()=>navigate('home'),'hf-brand');brand.prepend(node('span','hf-brand-mark',icon('play')));
@@ -68,13 +68,65 @@ export function createHomeflix(root) {
         }
         await load();
     }
-    async function getPersonTitles(personId,{signal,page=0}={}) {
-        signal?.throwIfAborted();const scope=currentView==='libraries'&&libraries.find(x=>x.id===selectedLibrary)?.vivamax?selectedLibrary:'general';
-        const views=allowedViews(scope),requestedUser=userId,requestedClient=client;const pageIndex=Math.max(0,Math.floor(Number(page)||0));
-        const batches=await Promise.allSettled(views.map(view=>requestedClient.getItems(requestedUser,{ParentId:view.id,PersonIds:personId,Recursive:true,IncludeItemTypes:'Movie,Series',IsVirtualItem:false,SortBy:'SortName',SortOrder:'Ascending',StartIndex:pageIndex*24,Limit:24,EnableUserData:true,Fields:'Overview,Genres,ProviderIds,People,MediaSources,Studios,DateCreated'})));
-        signal?.throwIfAborted();const success=batches.filter(x=>x.status==='fulfilled');if(views.length&&!success.length)throw new Error('Titles are temporarily unavailable. Try again.');
-        const unique=[...new Map(success.flatMap(x=>x.value.Items||[]).map(raw=>[raw.Id,raw])).values()];const visible=scope==='general'?filterGeneral(unique):unique;
-        return {items:visible.map(normalize),total:null,nextPage:success.some(x=>(pageIndex+1)*24<(x.value.TotalRecordCount||0))?pageIndex+1:null,notice:success.length<batches.length?'Some libraries are temporarily unavailable. Other accessible titles are shown.':''};
+    async function getEntityTitles(entity,{source='library',signal,page=0}={}) {
+        signal?.throwIfAborted();
+        entity.libraryScope ||= currentView==='libraries'&&libraries.find(x=>x.id===selectedLibrary)?.vivamax?selectedLibrary:'general';
+        const scope=entity.libraryScope,requestedUser=userId,requestedClient=client,ticket=generation;
+        const check=()=>{signal?.throwIfAborted();if(!active||loggedOut||ticket!==generation||requestedUser!==userId||requestedClient!==client)throw new DOMException('Browsing changed.','AbortError');};
+        let views=allowedViews(scope);
+        if(source==='catalog') {
+            await integrationFlight;check();views=allowedViews(scope);
+            if(!catalogAllowed&&!integrationFailed)return {items:[],nextPage:null,notice:'This profile can browse its permitted library titles only.'};
+            const params=new URLSearchParams({kind:entity.kind || 'person',page:String(page || 1),libraryId:scope});
+            if(entity.itemId&&entity.Id){params.set('itemId',entity.itemId);params.set('entityId',entity.Id);}
+            else if(entity.itemId&&entity.tmdbId){params.set('itemId',entity.itemId);params.set('entityTmdbId',String(entity.tmdbId));}
+            else if(entity.tmdbId&&entity.sourceTmdbId){params.set('sourceTmdbId',String(entity.sourceTmdbId));params.set('sourceType',entity.sourceType);params.set('entityTmdbId',String(entity.tmdbId));}
+            else return {items:[],nextPage:null,notice:'No verified catalog identity is available for this credit.'};
+            const data=await api(`requests/entity?${params}`,undefined,signal);check();
+            const nativeIds=[...new Set((data.items || []).map(item=>item.jellyfinId).filter(Boolean))];
+            const native=new Map();let hydrationFailed=false;
+            if(nativeIds.length){
+                const batches=await Promise.allSettled(views.map(view=>requestedClient.getItems(requestedUser,{ParentId:view.id,Ids:nativeIds.join(','),Recursive:true,IncludeItemTypes:'Movie,Series',Limit:nativeIds.length,EnableUserData:true,Fields:'Overview,Genres,ProviderIds,People,MediaSources,Studios,DateCreated'})));check();
+                hydrationFailed=batches.some(batch=>batch.status==='rejected');
+                const visible=batches.filter(batch=>batch.status==='fulfilled').flatMap(batch=>batch.value.Items || []);
+                (scope==='general'?filterGeneral(visible):visible).forEach(raw=>native.set(raw.Id,normalize(raw)));
+            }
+            const items=(data.items || []).flatMap(item=>{
+                if(item.jellyfinId)return native.has(item.jellyfinId)?[{...item,...native.get(item.jellyfinId)}]:[];
+                if(/^(available|partially available|unavailable to this profile)$/i.test(item.availability || ''))return [];
+                return [item];
+            });
+            if(!entity.Id&&!entity.nativeEntityId&&data.entity?.name){
+                const canonicalName=data.entity.name.normalize('NFKC').trim().toLocaleLowerCase();
+                const candidates=new Set();
+                for(const item of native.values()){
+                    if(!(data.items || []).some(credit=>credit.jellyfinId===item.jellyfinId&&credit.type===item.type&&String(credit.tmdbId || credit.id)===String(item.raw?.ProviderIds?.Tmdb || '')))continue;
+                    const credits=entity.kind==='studio'?item.raw?.Studios:item.raw?.People;
+                    const matches=(credits || []).filter(credit=>credit.Id&&credit.Name?.normalize('NFKC').trim().toLocaleLowerCase()===canonicalName);
+                    const ids=[...new Set(matches.map(credit=>credit.Id))];if(ids.length===1)candidates.add(ids[0]);
+                }
+                // The catalog credit and native credit belong to the same authorized title.
+                // A name by itself, outside this canonical title join, never proves identity.
+                if(candidates.size===1)entity.nativeEntityId=[...candidates][0];
+            }
+            return {...data,items,libraryEntityId:entity.nativeEntityId,partial:!!data.partial||hydrationFailed,notice:[data.notice,hydrationFailed?'Some library availability could not be checked. Retry request titles to recover those matches.':''].filter(Boolean).join(' ')};
+        }
+        if(!entity.Id&&!entity.nativeEntityId&&entity.tmdbId){
+            entity.nativeLookup ||= requestedClient.ajax({type:'GET',url:requestedClient.getUrl(entity.kind==='studio'?'Studios':'Persons',{UserId:requestedUser,SearchTerm:entity.Name,Fields:'ProviderIds',Limit:50,EnableImages:false}),dataType:'json'}).then(data=>{
+                const matches=(data.Items || []).filter(raw=>String(raw.ProviderIds?.Tmdb || '')===String(entity.tmdbId));
+                return matches.length===1?matches[0].Id:null;
+            }).catch(error=>{entity.nativeLookup=null;throw error;});
+            const verifiedId=await entity.nativeLookup;check();entity.nativeEntityId ||= verifiedId;
+        }
+        const nativeEntityId=entity.Id || entity.nativeEntityId;
+        if(!nativeEntityId)return {items:[],nextPage:null,notice:'No matching library credit was confirmed. Confirmed library titles from the catalog appear first.'};
+        const cursors=page&&typeof page==='object'?page:Object.fromEntries(views.map(view=>[view.id,Math.max(0,Math.floor(Number(page)||0))*24]));
+        const pending=views.filter(view=>Object.hasOwn(cursors,view.id));
+        const batches=await Promise.allSettled(pending.map(view=>requestedClient.getItems(requestedUser,{ParentId:view.id,[entity.kind==='studio'?'StudioIds':'PersonIds']:nativeEntityId,Recursive:true,IncludeItemTypes:'Movie,Series',IsVirtualItem:false,SortBy:'SortName',SortOrder:'Ascending',StartIndex:cursors[view.id],Limit:24,EnableUserData:true,Fields:'Overview,Genres,ProviderIds,People,MediaSources,Studios,DateCreated'})));
+        check();const success=batches.filter(batch=>batch.status==='fulfilled');if(pending.length&&!success.length)throw new Error('Your library titles are temporarily unavailable. Try again.');
+        const next={};batches.forEach((batch,index)=>{const id=pending[index].id;if(batch.status==='rejected')next[id]=cursors[id];else if(cursors[id]+24<(batch.value.TotalRecordCount || 0))next[id]=cursors[id]+24;});
+        const unique=[...new Map(success.flatMap(batch=>batch.value.Items || []).map(raw=>[raw.Id,raw])).values()];const visible=scope==='general'?filterGeneral(unique):unique;
+        return {items:visible.map(normalize),nextPage:Object.keys(next).length?next:null,notice:success.length<batches.length?'Some libraries are temporarily unavailable. More library titles will retry them.':''};
     }
     function browseState(id){if(!browsing.has(id))browsing.set(id,{...readUser(userKey(`filters.${id}`),{SortBy:'SortName',SortOrder:'Ascending'}),page:1,mode:'titles'});return browsing.get(id);}
     async function browse(){if(!selectedLibrary || !libraries.some(x=>x.id===selectedLibrary))selectedLibrary=libraries.find(x=>!x.vivamax)?.id;const view=libraries.find(x=>x.id===selectedLibrary);heading.textContent=view?.name || 'Libraries';renderShortcuts();if(!view){results.append(empty('No accessible libraries.'));return;}const state=browseState(view.id);const ticket=generation;let fields=libraryFilterFields({},[],view.kind);let page=1,loading=false;
@@ -104,9 +156,9 @@ export function createHomeflix(root) {
     search.addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(searchTitles,300);});search.addEventListener('keydown',event=>{if(event.key==='Enter'){clearTimeout(searchTimer);searchTitles();}});
     return {
         async onResume(){active=true;client=ServerConnections.currentApiClient();const first=!userId;userId=client.getCurrentUserId();if(first){const saved=readSession(userKey('navigation'),{});currentView=saved.view || 'home';selectedLibrary=saved.library || '';discoverView=saved.discover || 'discover';restoreScroll=saved.scroll || 0;restoreSearch=saved.search || '';(saved.browsing || []).forEach(([key,value])=>browsing.set(key,value));if(saved.ai)Object.assign(aiState,saved.ai);if(saved.returnId){try{returnDetails=normalize(await client.getItem(userId,saved.returnId));}catch{/* A removed or inaccessible item is not reopened. */}}}language=readUser(userKey('language'),'english');aiState.language=language;document.documentElement.classList.add('homeflix-active');const ticket=generation;
-            details?.destroy();details=createDetails({client,userId,api,normalize,play,isSaved,toggleList,getLanguage:()=>language,setLanguage:rememberLanguage,getPersonTitles});
+            details?.destroy();details=createDetails({client,userId,api,normalize,play,isSaved,toggleList,getLanguage:()=>language,setLanguage:rememberLanguage,getEntityTitles});
             try{const local=await client.getUserViews({},userId);libraries=(local.Items || []).filter(x=>['movies','tvshows'].includes(x.CollectionType)&&!/preroll/i.test(x.Name)).map(x=>({id:x.Id,name:/anime/i.test(x.Name)?'Anime Series':x.Name,kind:x.CollectionType==='tvshows'?'Series':'Movie',vivamax:/\b(?:vivamax|vmx)\b/i.test(x.Name)}));}catch{/* Gateway configuration can also provide authorized views. */}
-            const configPromise=homeflixApi('config',undefined,{client,signal:AbortSignal.timeout(10000)}).then(config=>{catalogAllowed=config.catalogAllowed;libraries=config.libraries || libraries;discoveryFields=config.discoveryFilters || {};return homeflixApi('requests/session',undefined,{client,signal:AbortSignal.timeout(10000)}).then(()=>{requestReady=true;},()=>{requestReady=false;});}).catch(()=>{catalogAllowed=false;requestReady=false;}).finally(()=>{integrationReady=true;});
+            integrationReady=false;integrationFailed=false;const configPromise=homeflixApi('config',undefined,{client,signal:AbortSignal.timeout(10000)}).then(config=>{catalogAllowed=config.catalogAllowed;libraries=config.libraries || libraries;discoveryFields=config.discoveryFilters || {};return homeflixApi('requests/session',undefined,{client,signal:AbortSignal.timeout(10000)}).then(()=>{requestReady=true;},()=>{requestReady=false;});}).catch(()=>{catalogAllowed=false;requestReady=false;integrationFailed=true;}).finally(()=>{integrationReady=true;});integrationFlight=configPromise;
             if(!active || ticket!==generation)return;await navigate(currentView);if(restoreSearch){searchBox.hidden=false;search.value=restoreSearch;restoreSearch='';await searchTitles();}if(restoreScroll){root.closest('.page')?.scrollTo(0,restoreScroll);window.scrollTo(0,restoreScroll);restoreScroll=0;}if(returnDetails&&active){const item=returnDetails;returnDetails=null;details.show(item);}
             const rendered=generation;configPromise.then(()=>{if(!active)return;if(rendered===generation&&currentView==='home')upcoming(rendered);if(['discover','requests'].includes(currentView)&&results.querySelector('.hf-empty'))navigate(currentView);else if(rendered===generation&&!document.activeElement?.closest('.hf-ai')&&!document.querySelector('dialog[open]')&&!aiState.busy&&['home','libraries'].includes(currentView)){const scope=currentView==='libraries'&&libraries.find(x=>x.id===selectedLibrary)?.vivamax?selectedLibrary:'general';if(currentView==='home'||scope!=='general'){aiCleanup?.();aiHost.replaceChildren();mountAI(aiHost,scope);}}});
         },
