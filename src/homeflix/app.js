@@ -23,7 +23,7 @@ const safeImage = value => {
 export function createHomeflix(root) {
     let client, userId, active = false, generation = 0, searchTimer, requestController, summaryTimer;
     let currentView = 'home', catalogAllowed = false, requestReady = false, language = 'english', currentDialog, summaryGeneration = 0, summaryCooldown = 0;
-    let aiPrompt = '', aiHistory = [], aiPage = 1, aiStudio, aiCatalog = false, browsePage = 1;
+    let aiPrompt = '', aiHistory = [], aiPage = 1, aiStudio, aiCatalog = false, browsePage = 1, aiCooldown = 0;
     const libraryItems = new Map();
     const key = () => `homeflix.list.${client.serverId()}.${userId}`;
     const loadList = () => { try { return JSON.parse(localStorage.getItem(key()) || '[]').slice(0, 200); } catch { return []; } };
@@ -49,7 +49,8 @@ export function createHomeflix(root) {
     const image = (item, type = 'Primary') => safeImage(client.getImageUrl(item.Id, { type, maxWidth: type === 'Backdrop' ? 1600 : 400, quality: 90 }));
     function normalize(item) {
         libraryItems.set(item.Id, item);
-        return { id: item.Id, title: item.Name, year: item.ProductionYear, overview: item.Overview, genres: item.Genres || [],
+        const title = item.Type === 'Episode' && item.SeriesName ? `${item.SeriesName} · S${item.ParentIndexNumber ?? 0} E${item.IndexNumber ?? 0} · ${item.Name}` : item.Name;
+        return { id: item.Id, title, year: item.ProductionYear, overview: item.Overview, genres: item.Genres || [],
             rating: item.CommunityRating, type: item.Type === 'Movie' ? 'movie' : 'tv', library: true, poster: image(item),
             jellyfinId: item.Id, progress: item.UserData?.PlayedPercentage || 0, raw: item };
     }
@@ -160,6 +161,8 @@ export function createHomeflix(root) {
         const submit=el('button','hf-button hf-primary','Find recommendations');submit.type='submit';const picks=el('div','hf-ai-picks');
         const fields=el('div','hf-ai-options');fields.append(source,lang,media,submit);form.append(prompt,fields);controls.append(form);results.append(picks);
         let previousSource='';let previousType='';
+        const resetPicks = () => { if (Date.now() >= aiCooldown) { submit.disabled=false; submit.textContent='Find recommendations'; } };
+        prompt.addEventListener('input', resetPicks); source.addEventListener('change', resetPicks); media.addEventListener('change', resetPicks); lang.addEventListener('change', resetPicks);
         form.addEventListener('submit',async e=>{e.preventDefault();if(source.value==='catalog'&&!requestReady){results.replaceChildren();reconnect();return;}if(!prompt.value.trim())return;
             if(prompt.value.trim()!==aiPrompt||source.value!==previousSource||media.value!==previousType){aiPrompt=prompt.value.trim();aiHistory=[];aiPage=1;aiStudio=undefined;aiCatalog=false;}previousSource=source.value;previousType=media.value;language=lang.value;
             submit.disabled=true;const ticket=generation;message('Checking real titles for your next watch…');
@@ -167,8 +170,8 @@ export function createHomeflix(root) {
                 if(data.studios?.length){picks.replaceChildren();data.studios.forEach(studio=>picks.append(button(`${studio.name} · ${studio.country||studio.originCountry||'Studio'}`,()=>{aiStudio=studio.id;submit.disabled=false;form.requestSubmit();},'hf-button hf-studio')));message(data.message);return;}
                 const items=data.items.map(x=>source.value==='library'?{...x,library:true,jellyfinId:x.id,poster:safeImage(client.getImageUrl(x.id,{type:'Primary',maxWidth:400}))}:x);
                 aiHistory.push(...items.map(x=>source.value==='library'?x.id:`${x.type}:${x.id}`));aiHistory=aiHistory.slice(-100);aiPage=data.nextPage;aiCatalog=data.catalog===true;picks.replaceChildren();grid(items,picks);message(data.message||data.reason||'Here are your picks.');submit.textContent=source.value==='catalog'&&aiCatalog?'Load more titles':'Find more picks';
-            }catch(error){actionError(error);if(error.retryAfter){setTimeout(()=>{if(active&&ticket===generation)submit.disabled=false;},error.retryAfter*1000);return;}}
-            finally{if(ticket===generation)submit.disabled=source.value==='catalog'&&aiPage===null&&aiHistory.length>0;}
+            }catch(error){actionError(error);if(error.retryAfter){aiCooldown=Date.now()+error.retryAfter*1000;setTimeout(()=>{if(active&&ticket===generation)submit.disabled=false;},error.retryAfter*1000);return;}}
+            finally{if(ticket===generation)submit.disabled=Date.now()<aiCooldown||(source.value==='catalog'&&aiPage===null&&aiHistory.length>0);}
         });
     }
     function closeDetails(){summaryGeneration++;clearTimeout(summaryTimer);currentDialog?.close();currentDialog?.remove();currentDialog=null;}
@@ -216,10 +219,10 @@ export function createHomeflix(root) {
     search.addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(searchTitles,300);});search.addEventListener('keydown',e=>{if(e.key==='Enter'){clearTimeout(searchTimer);searchTitles();}});
     const tools=root.querySelector('.hf-user-tools');tools.append(button('Refresh',()=>navigate(currentView),'hf-tool'),button('Settings',()=>Dashboard.navigate('mypreferencesdisplay'),'hf-tool'),button('Sign out',async()=>{try{await homeflixApi('requests/logout',{}, {client});}catch{/* Jellyfin sign-out remains available. */}sessionStorage.removeItem('homeflix.requests.error');Dashboard.logout();},'hf-tool'));
     return {
-        async onResume(){active=true;client=ServerConnections.currentApiClient();userId=client.getCurrentUserId();document.body.classList.add('homeflix-active');
+        async onResume(){active=true;client=ServerConnections.currentApiClient();userId=client.getCurrentUserId();document.documentElement.classList.add('homeflix-active');
             requestController=new AbortController();try{const config=await api('config');catalogAllowed=config.catalogAllowed;try{await api('requests/session');requestReady=true;}catch{requestReady=false;}}catch{requestReady=false;}
             if(active)await navigate(currentView);},
-        onPause(){active=false;generation++;requestController?.abort();clearTimeout(searchTimer);closeDetails();document.body.classList.remove('homeflix-active');},
+        onPause(){active=false;generation++;requestController?.abort();clearTimeout(searchTimer);closeDetails();document.documentElement.classList.remove('homeflix-active');},
         destroy(){this.onPause();root.replaceChildren();}
     };
 }
