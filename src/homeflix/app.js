@@ -220,8 +220,11 @@ export function createHomeflix(root) {
     const tools=root.querySelector('.hf-user-tools');tools.append(button('Refresh',()=>navigate(currentView),'hf-tool'),button('Settings',()=>Dashboard.navigate('mypreferencesdisplay'),'hf-tool'),button('Sign out',async()=>{try{await homeflixApi('requests/logout',{}, {client});}catch{/* Jellyfin sign-out remains available. */}sessionStorage.removeItem('homeflix.requests.error');Dashboard.logout();},'hf-tool'));
     return {
         async onResume(){active=true;client=ServerConnections.currentApiClient();userId=client.getCurrentUserId();document.documentElement.classList.add('homeflix-active');
-            requestController=new AbortController();try{const config=await api('config');catalogAllowed=config.catalogAllowed;gatewayError='';try{await api('requests/session');requestReady=true;}catch{requestReady=false;}}catch(error){requestReady=false;catalogAllowed=false;gatewayError=error.message;}
-            if(active)await navigate(currentView);},
+            const initialGeneration=generation;gatewayError='Connecting HomeFlix services…';requestController=new AbortController();
+            try{const config=await homeflixApi('config',undefined,{client});catalogAllowed=config.catalogAllowed;gatewayError='';try{await homeflixApi('requests/session',undefined,{client});requestReady=true;}catch{if(generation===initialGeneration)requestReady=false;}}
+            catch(error){if(generation===initialGeneration)requestReady=false;catalogAllowed=false;gatewayError=error.message;}
+            const waiting=status.textContent==='Connecting HomeFlix services…';
+            if(active&&(generation===initialGeneration||waiting))await navigate(currentView);},
         onPause(){active=false;generation++;requestController?.abort();clearTimeout(searchTimer);closeDetails();document.documentElement.classList.remove('homeflix-active');},
         destroy(){this.onPause();root.replaceChildren();}
     };
