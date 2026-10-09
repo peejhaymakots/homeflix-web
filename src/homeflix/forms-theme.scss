@@ -462,7 +462,9 @@
 }
 
 /* Keep the native Jellyfin authentication controls and improve their hierarchy. */
-body:has(#loginPage:not(.hide)) .skinHeader {
+body:has(#loginPage:not(.hide)) .skinHeader,
+body:has(#loginPage:not(.hide)) .MuiAppBar-root,
+body:has(#loginPage:not(.hide)) .MuiToolbar-root {
     display: none !important;
 }
 
