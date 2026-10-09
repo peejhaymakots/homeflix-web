@@ -29,7 +29,7 @@ export function createDetails({client,userId,api,normalize,play,isSaved,toggleLi
             summary.append(node('div','hf-summary-heading',node('h3','', 'HomeFlix AI summary'),node('span','hf-summary-label','SPOILER-FREE')),languages,summaryText,retry);
             const synopsis=node('details','hf-synopsis',node('summary','',node('span','','Full synopsis'),node('span','hf-muted','May contain spoilers')),node('p','',active.overview || 'No synopsis is available.'));
             content.append(summary,synopsis,credits);
-            if(active.library)content.append(options,episodeContainer);else if(active.canRequest)renderRequest();
+            if(active.library){origin.after(options);content.append(episodeContainer);}else if(active.canRequest)renderRequest();
             function metadata(media) {
                 facts.replaceChildren();[media.year,media.tmdbRating?`TMDB ${media.tmdbRating}`:media.rating?`★ ${Number(media.rating).toFixed(1)} / 10`:'',media.runtime || (media.raw?.RunTimeTicks?`${Math.round(media.raw.RunTimeTicks/600000000)} min`:''),media.certification || media.raw?.OfficialRating,media.releaseDate?`Released ${new Date(media.releaseDate).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'})}`:'',media.statusText || media.status || media.raw?.Status].filter(Boolean).forEach(text=>facts.append(node('span','',text)));
                 genres.replaceChildren(...(media.genres || []).map(genre=>node('span','',genre)));tagline.textContent=media.tagline || media.raw?.Taglines?.[0] || '';origin.textContent=media.origin || (media.raw?.ProductionLocations || []).join(', ');credits.replaceChildren();
