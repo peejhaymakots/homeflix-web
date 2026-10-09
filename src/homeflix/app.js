@@ -85,7 +85,7 @@ export function createHomeflix(root) {
         heading.textContent = 'Your movie night starts here'; message('Loading your library…');
         const [latest, resume, series] = await Promise.allSettled([
             libraryQuery({ SortBy: 'DateCreated', SortOrder: 'Descending', IncludeItemTypes: 'Movie', Limit: 20 }),
-            client.getResumeItems(userId, { Limit: 12, MediaTypes: 'Video', Fields: 'Overview,Genres,ProviderIds' }),
+            client.ajax({ type: 'GET', url: client.getUrl(`Users/${userId}/Items/Resume`, { Limit: 12, MediaTypes: 'Video', Fields: 'Overview,Genres,ProviderIds' }), dataType: 'json' }),
             libraryQuery({ SortBy: 'DateCreated', SortOrder: 'Descending', IncludeItemTypes: 'Episode', Limit: 20 })
         ]);
         if (ticket !== generation || !active) return;
