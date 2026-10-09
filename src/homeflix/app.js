@@ -22,7 +22,7 @@ const safeImage = value => {
 
 export function createHomeflix(root) {
     let client, userId, active = false, generation = 0, searchTimer, requestController, summaryTimer;
-    let currentView = 'home', catalogAllowed = false, requestReady = false, language = 'english', currentDialog, summaryGeneration = 0, summaryCooldown = 0;
+    let currentView = 'home', catalogAllowed = false, requestReady = false, gatewayError = '', language = 'english', currentDialog, summaryGeneration = 0, summaryCooldown = 0;
     let aiPrompt = '', aiHistory = [], aiPage = 1, aiStudio, aiCatalog = false, browsePage = 1, aiCooldown = 0;
     const libraryItems = new Map();
     const key = () => `homeflix.list.${client.serverId()}.${userId}`;
@@ -132,7 +132,7 @@ export function createHomeflix(root) {
         if(ticket===generation)await load();
     }
     async function reconnect() {
-        if(!catalogAllowed){message('Catalog discovery and Requests are unavailable for this restricted profile.');return;}
+        if(!catalogAllowed){message(gatewayError || 'Catalog discovery and Requests are unavailable for this restricted profile.');return;}
         heading.textContent='Connect Requests';
         const form=el('form','hf-panel hf-reconnect'); form.append(el('h2','','Connect your HomeFlix requests'),el('p','','Your Jellyfin playback remains available. Sign in here to reconnect Requests.'));
         const name=el('input');name.placeholder='Jellyfin username';name.autocomplete='username';name.required=true;name.setAttribute('aria-label','Jellyfin username');
@@ -220,7 +220,7 @@ export function createHomeflix(root) {
     const tools=root.querySelector('.hf-user-tools');tools.append(button('Refresh',()=>navigate(currentView),'hf-tool'),button('Settings',()=>Dashboard.navigate('mypreferencesdisplay'),'hf-tool'),button('Sign out',async()=>{try{await homeflixApi('requests/logout',{}, {client});}catch{/* Jellyfin sign-out remains available. */}sessionStorage.removeItem('homeflix.requests.error');Dashboard.logout();},'hf-tool'));
     return {
         async onResume(){active=true;client=ServerConnections.currentApiClient();userId=client.getCurrentUserId();document.documentElement.classList.add('homeflix-active');
-            requestController=new AbortController();try{const config=await api('config');catalogAllowed=config.catalogAllowed;try{await api('requests/session');requestReady=true;}catch{requestReady=false;}}catch{requestReady=false;}
+            requestController=new AbortController();try{const config=await api('config');catalogAllowed=config.catalogAllowed;gatewayError='';try{await api('requests/session');requestReady=true;}catch{requestReady=false;}}catch(error){requestReady=false;catalogAllowed=false;gatewayError=error.message;}
             if(active)await navigate(currentView);},
         onPause(){active=false;generation++;requestController?.abort();clearTimeout(searchTimer);closeDetails();document.documentElement.classList.remove('homeflix-active');},
         destroy(){this.onPause();root.replaceChildren();}
